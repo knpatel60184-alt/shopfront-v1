@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <title>Shopfront V1</title>
+
+  <link
+    rel="stylesheet"
+    href="style.css"
+  />
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  ></script>
+</head>
+
+<body>
+
+  <main class="app-shell">
+
+    <section class="hero">
+
+      <h1>SHOPFRONT</h1>
+
+      <p class="tagline">
+        Find real products in real nearby shops.
+      </p>
+
+      <p class="subtext">
+        Prototype V1 — first make it working, then make it beautiful.
+      </p>
+
+
+      <!-- ========================= -->
+      <!-- MAIN GATEWAY -->
+      <!-- ========================= -->
+
+      <div id="gatewayScreen">
+
+        <div class="gateway-grid">
+
+          <button
+            class="gateway-card"
+            data-role="customer"
+          >
+            <span class="icon">🛍️</span>
+
+            <h2>Customer</h2>
+
+            <p>
+              Search products and find nearby shops.
+            </p>
+          </button>
+
+
+          <button
+            class="gateway-card"
+            data-role="shopkeeper"
+          >
+            <span class="icon">🏪</span>
+
+            <h2>Shopkeeper</h2>
+
+            <p>
+              Add stock and manage reservations.
+            </p>
+          </button>
+
+
+          <button
+            class="gateway-card"
+            data-role="delivery"
+          >
+            <span class="icon">🛵</span>
+
+            <h2>Delivery Partner</h2>
+
+            <p>
+              See and manage delivery jobs.
+            </p>
+          </button>
+
+        </div>
+
+      </div>
+
+
+      <!-- ========================= -->
+      <!-- CUSTOMER -->
+      <!-- ========================= -->
+
+      <div
+        id="customerScreen"
+        class="hidden"
+      >
+
+        <button
+          id="backButton"
+          class="back-button"
+        >
+          ← Back
+        </button>
+
+        <h2 class="section-title">
+          Customer Search
+        </h2>
+
+        <div class="search-box">
+
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Search for Activa brake pad"
+          />
+
+          <button id="searchButton">
+            Search
+          </button>
+
+        </div>
+
+        <div id="searchResults"></div>
+
+      </div>
+
+
+      <!-- ========================= -->
+      <!-- SHOP DETAIL -->
+      <!-- ========================= -->
+
+      <div
+        id="shopDetailScreen"
+        class="hidden"
+      >
+
+        <button
+          id="backToResultsButton"
+          class="back-button"
+        >
+          ← Back to Results
+        </button>
+
+        <div id="shopDetailContent"></div>
+
+      </div>
+
+
+      <!-- ========================= -->
+      <!-- MAP -->
+      <!-- ========================= -->
+
+      <div
+        id="mapScreen"
+        class="hidden"
+      >
+
+        <button
+          id="backToShopButton"
+          class="back-button"
+        >
+          ← Back to Shop
+        </button>
+
+        <h2 class="section-title">
+          Shop Location
+        </h2>
+
+        <div id="map"></div>
+
+      </div>
+
+
+      <!-- ========================= -->
+      <!-- SHOPKEEPER -->
+      <!-- ========================= -->
+
+      <div
+        id="shopkeeperScreen"
+        class="hidden"
+      >
+
+        <button
+          id="shopkeeperBackButton"
+          class="back-button"
+        >
+          ← Back
+        </button>
+
+        <h2 class="section-title">
+          Shopkeeper Dashboard
+        </h2>
+
+        <div class="shopkeeper-layout">
+
+
+          <!-- INVENTORY -->
+
+          <div class="shopkeeper-card">
+
+            <h3>
+              Shop Details
+            </h3>
+
+            <label for="shopNameInput">
+              Shop Name
+            </label>
+
+            <input
+              id="shopNameInput"
+              type="text"
+              placeholder="Example: Patel Auto Parts"
+            />
+
+            <label for="ownerNameInput">
+              Owner Name
+            </label>
+
+            <input
+              id="ownerNameInput"
+              type="text"
+              placeholder="Owner name"
+            />
+
+            <label for="shopPhoneInput">
+              Phone Number
+            </label>
+
+            <input
+              id="shopPhoneInput"
+              type="tel"
+              placeholder="Phone number"
+            />
+
+            <label for="shopAddressInput">
+              Shop Address
+            </label>
+
+            <input
+              id="shopAddressInput"
+              type="text"
+              placeholder="Shop address"
+            />
+
+            <hr />
+
+            <h3>
+              Product Inventory
+            </h3>
+
+            <div class="fixed-product-name">
+              Honda Activa Brake Pad
+            </div>
+
+            <label for="productPriceInput">
+              Price
+            </label>
+
+            <input
+              id="productPriceInput"
+              type="number"
+              placeholder="Example: 350"
+              min="0"
+            />
+
+            <label for="productStockInput">
+              Quantity in Stock
+            </label>
+
+            <input
+              id="productStockInput"
+              type="number"
+              placeholder="Example: 6"
+              min="0"
+            />
+
+            <label class="delivery-option">
+
+              <input
+                id="homeDeliveryInput"
+                type="checkbox"
+              />
+
+              Home delivery available
+
+            </label>
+
+            <button
+              id="saveShopButton"
+              class="save-shop-button"
+            >
+              Save Shop & Inventory
+            </button>
+
+            <div
+              id="shopkeeperSaveResult"
+              class="hidden"
+            ></div>
+
+          </div>
+
+
+          <!-- BOOKINGS -->
+
+          <div class="shopkeeper-card">
+
+            <h3>
+              Active Reservations
+            </h3>
+
+            <p class="queue-help-text">
+              Customer pickup reservations appear here.
+            </p>
+
+            <div id="reservationQueue">
+
+              <p class="empty-result">
+                No active reservations yet.
+              </p>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- ========================= -->
+      <!-- DELIVERY PARTNER -->
+      <!-- ========================= -->
+
+      <div
+        id="deliveryScreen"
+        class="hidden"
+      >
+
+        <button
+          id="deliveryBackButton"
+          class="back-button"
+        >
+          ← Back
+        </button>
+
+        <h2 class="section-title">
+          Delivery Partner Dashboard
+        </h2>
+
+
+        <div class="delivery-layout">
+
+
+          <!-- DELIVERY PERSON INFO -->
+
+          <div class="shopkeeper-card">
+
+            <h3>
+              Delivery Partner
+            </h3>
+
+            <label for="deliveryPersonName">
+              Name
+            </label>
+
+            <input
+              id="deliveryPersonName"
+              type="text"
+              placeholder="Example: Rahul"
+            />
+
+
+            <label for="deliveryPersonPhone">
+              Phone Number
+            </label>
+
+            <input
+              id="deliveryPersonPhone"
+              type="tel"
+              placeholder="Phone number"
+            />
+
+
+            <label class="delivery-option">
+
+              <input
+                id="deliveryOnlineToggle"
+                type="checkbox"
+              />
+
+              Available for deliveries
+
+            </label>
+
+
+            <button
+              id="saveDeliveryPartnerButton"
+              class="save-shop-button"
+            >
+              Save Delivery Status
+            </button>
+
+
+            <div
+              id="deliveryPartnerSaveResult"
+              class="hidden"
+            ></div>
+
+          </div>
+
+
+          <!-- DELIVERY JOBS -->
+
+          <div class="shopkeeper-card">
+
+            <h3>
+              Delivery Jobs
+            </h3>
+
+            <p class="queue-help-text">
+              Home-delivery requests will appear here.
+            </p>
+
+
+            <div id="deliveryJobQueue">
+
+              <p class="empty-result">
+                No delivery jobs yet.
+              </p>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- ========================= -->
+      <!-- STATUS -->
+      <!-- ========================= -->
+
+      <div
+        id="messageBox"
+        class="message-box"
+      >
+        Select a gateway to continue.
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
