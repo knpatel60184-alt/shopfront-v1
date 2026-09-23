@@ -36,7 +36,10 @@ jobs:
           cp index.html public/
           cp style.css public/
           cp app.js public/
-          printf 'window.SHOPFRONT_CONFIG = {\n  CARTO_API_KEY: "%s"\n};\n' "$CARTO_API_KEY" > public/config.js
+
+          CLEAN_CARTO_KEY="$(printf '%s' "$CARTO_API_KEY" | tr -d '\r\n')"
+
+          printf 'window.SHOPFRONT_CONFIG = { CARTO_API_KEY: "%s" };\n' "$CLEAN_CARTO_KEY" > public/config.js
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
