@@ -154,6 +154,7 @@
 
   customerGateway.addEventListener("click", () => {
     refreshCustomerAccount();
+    loadMyOnlineReservations();
   });
 
   // ==========================================
@@ -204,6 +205,7 @@
     );
 
     parent.appendChild(paragraph);
+    return paragraph;
   }
 
   // ==========================================
@@ -260,7 +262,7 @@
     );
 
     addDetailLine(card, "Price", `₹${product.price}`);
-    addDetailLine(card, "Available stock", product.stock);
+    const stockLine = addDetailLine(card, "Available stock", product.stock);
 
     addDetailLine(
       card,
@@ -282,13 +284,14 @@
 
     const notice = makeElement(
       "p",
-      "V2 online catalog preview. Online reservations and deliveries are not connected yet."
+      "V2 online pickup reservations are enabled for signed-in customers. Shopkeeper pickup confirmation and online delivery are not connected yet."
     );
 
     notice.style.marginTop = "22px";
     notice.style.fontWeight = "bold";
 
     card.appendChild(notice);
+    addReserveControls(card, product, stockLine);
     shopDetailContent.appendChild(card);
 
     showScreen("shopDetailScreen");
@@ -474,11 +477,232 @@
     true
   );
 
+
+  // ==========================================
+  // ONLINE PICKUP RESERVATIONS (V2)
+  // ==========================================
+
+  let reservationsOutput = null;
+  let latestReservationsCheck = 0;
+
+  function setupOnlineReservationsPanel() {
+    const accountPanel = document.getElementById("customerAccountPanel");
+    const panel = makeElement("section", undefined, "shop-result");
+    panel.style.marginBottom = "24px";
+
+    const heading = makeElement("h3", "My Online Reservations");
+    const help = makeElement(
+      "p",
+      "Active reservations and pickup codes are saved online in your account."
+    );
+    const refresh = makeElement(
+      "button", "Refresh Reservations", "view-shop-button"
+    );
+    refresh.type = "button";
+    refresh.addEventListener("click", loadMyOnlineReservations);
+
+    reservationsOutput = makeElement("div");
+    reservationsOutput.style.marginTop = "14px";
+    reservationsOutput.setAttribute("aria-live", "polite");
+
+    panel.append(heading, help, refresh, reservationsOutput);
+    accountPanel.insertAdjacentElement("afterend", panel);
+  }
+
+  function updateReservationCountdowns() {
+    document.querySelectorAll("[data-shopfront-expires]")
+      .forEach(element => {
+        const remaining = new Date(element.dataset.shopfrontExpires).getTime() - Date.now();
+        if (!Number.isFinite(remaining)) {
+          element.textContent = "Unavailable";
+        } else if (remaining <= 0) {
+          element.textContent = "Expired (awaiting database refresh)";
+        } else {
+          const seconds = Math.ceil(remaining / 1000);
+          const hours = Math.floor(seconds / 3600);
+          const minutes = Math.floor((seconds % 3600) / 60);
+          const secs = seconds % 60;
+          element.textContent = [hours, minutes, secs]
+            .map(value => String(value).padStart(2, "0"))
+            .join(":");
+        }
+      });
+  }
+
+  function addCountdown(parent, expiresAt) {
+    const line = makeElement("p");
+    const value = makeElement("strong", "");
+    value.dataset.shopfrontExpires = expiresAt;
+    line.append("Time remaining: ", value);
+    parent.appendChild(line);
+    updateReservationCountdowns();
+  }
+
+  function displayReservation(parent, reservation, productName, shopName) {
+    const card = makeElement("div", undefined, "reservation-card");
+    card.appendChild(makeElement("h4", productName || "Reserved product"));
+    if (shopName) {
+      addDetailLine(card, "Shop", shopName);
+    }
+    addDetailLine(card, "Pickup code", reservation.pickup_code);
+    addDetailLine(
+      card, "Expires at",
+      new Date(reservation.expires_at).toLocaleString("en-IN")
+    );
+    addCountdown(card, reservation.expires_at);
+    parent.appendChild(card);
+  }
+
+  async function loadMyOnlineReservations() {
+    if (!reservationsOutput) return;
+    const checkId = ++latestReservationsCheck;
+    reservationsOutput.replaceChildren(
+      makeElement("p", "Loading online reservations...")
+    );
+
+    try {
+      const supabaseClient = getClient();
+      const { data: userInfo, error: loginError } =
+        await supabaseClient.auth.getUser();
+
+      if (checkId !== latestReservationsCheck) return;
+      if (loginError && loginError.name !== "AuthSessionMissingError") {
+        throw loginError;
+      }
+      if (!userInfo?.user) {
+        reservationsOutput.replaceChildren(
+          makeElement("p", "Log in to view your online reservations.")
+        );
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .from("reservations")
+        .select("id, pickup_code, expires_at, products(name, shops(name))")
+        .eq("customer_id", userInfo.user.id)
+        .eq("status", "active")
+        .gt("expires_at", new Date().toISOString())
+        .order("reserved_at", { ascending: false })
+        .limit(20);
+
+      if (checkId !== latestReservationsCheck) return;
+      if (error) throw error;
+
+      reservationsOutput.replaceChildren();
+      if (!data || data.length === 0) {
+        reservationsOutput.appendChild(
+          makeElement("p", "No active online reservations yet.")
+        );
+        return;
+      }
+
+      data.forEach(reservation => {
+        displayReservation(
+          reservationsOutput,
+          reservation,
+          reservation.products?.name,
+          reservation.products?.shops?.name
+        );
+      });
+    } catch (error) {
+      if (checkId !== latestReservationsCheck) return;
+      reservationsOutput.replaceChildren(
+        makeElement("p", "Could not load reservations: " + error.message)
+      );
+    }
+  }
+
+  function addReserveControls(card, product, stockLine) {
+    const button = makeElement(
+      "button", "Reserve for Pickup", "reserve-button"
+    );
+    button.type = "button";
+    const feedback = makeElement("div");
+    feedback.setAttribute("aria-live", "polite");
+
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "Reserving...";
+      feedback.replaceChildren(
+        makeElement("p", "Checking your account and product stock...")
+      );
+      let succeeded = false;
+      try {
+        const supabaseClient = getClient();
+        const { data: userInfo, error: loginError } =
+          await supabaseClient.auth.getUser();
+        if (loginError && loginError.name !== "AuthSessionMissingError") {
+          throw loginError;
+        }
+        if (!userInfo?.user) {
+          feedback.replaceChildren(
+            makeElement("p", "Please log in before reserving a product.")
+          );
+          const login = makeElement(
+            "button", "Log In / Sign Up", "view-shop-button"
+          );
+          login.type = "button";
+          login.addEventListener("click", () => {
+            window.location.href = "auth.html";
+          });
+          feedback.appendChild(login);
+          return;
+        }
+
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_reserve_product", { p_product_id: product.id }
+        );
+        if (error) throw error;
+        if (!data?.success) {
+          const message = data?.reason === "already_reserved"
+            ? "You already reserved this product. See your pickup code in My Online Reservations."
+            : data?.reason === "out_of_stock"
+              ? "This product is currently out of stock. Search again later."
+              : "Reservation could not be completed. Please try again.";
+          feedback.replaceChildren(makeElement("p", message));
+          await loadMyOnlineReservations();
+          return;
+        }
+
+        succeeded = true;
+        product.stock = Number(data.remaining_stock);
+        stockLine.lastChild.textContent = String(product.stock);
+
+        const success = makeElement("div", undefined, "reservation-success");
+        success.appendChild(makeElement("h3", "Reservation Confirmed!"));
+        success.appendChild(makeElement("p", "Show this pickup code at the shop:"));
+        success.appendChild(makeElement("div", data.pickup_code, "pickup-code"));
+        addCountdown(success, data.expires_at);
+        addDetailLine(success, "Remaining stock", product.stock);
+        success.appendChild(makeElement(
+          "p", "Your reservation is saved online for 2 hours."
+        ));
+        feedback.replaceChildren(success);
+        displayMessage("Online pickup reservation saved successfully.");
+        await loadMyOnlineReservations();
+      } catch (error) {
+        feedback.replaceChildren(
+          makeElement("p", "Reservation failed: " + error.message)
+        );
+      } finally {
+        button.disabled = succeeded;
+        button.textContent = succeeded
+          ? "Reservation Created"
+          : "Reserve for Pickup";
+      }
+    });
+
+    card.append(button, feedback);
+  }
+
   // ==========================================
   // INITIALIZATION
   // ==========================================
 
+  setupOnlineReservationsPanel();
   refreshCustomerAccount();
+  loadMyOnlineReservations();
+  setInterval(updateReservationCountdowns, 1000);
 
   console.log(
     "Shopfront V2 online catalog and account recognition initialized."
