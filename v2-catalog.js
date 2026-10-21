@@ -700,7 +700,7 @@
 
 
   // ==========================================
-  // V2 SHOPKEEPER ONLINE RESERVATIONS (READ-ONLY)
+  // V2 SHOPKEEPER ONLINE RESERVATIONS AND PICKUP VERIFICATION
   // ==========================================
 
   let shopkeeperAccessStatus = null;
@@ -741,7 +741,7 @@
     queueCard.appendChild(makeElement("h3", "Online Active Reservations"));
     queueCard.appendChild(makeElement(
       "p",
-      "Live reservation data from Supabase for shops owned by this account. Pickup verification is not connected yet.",
+      "Live Supabase reservations for your assigned shops. Confirm collection only after the customer presents their four-digit pickup code in person.",
       "queue-help-text"
     ));
 
@@ -772,6 +772,118 @@
       displayMessage("V2 online Shopkeeper Dashboard opened.");
       refreshOnlineShopkeeperReservations();
     }, true);
+  }
+
+
+  function addOnlinePickupVerification(entry, booking) {
+    const form = makeElement("form");
+    form.style.marginTop = "16px";
+
+    const label = makeElement(
+      "label",
+      "Customer's four-digit pickup code"
+    );
+    const input = makeElement("input");
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.maxLength = 4;
+    input.pattern = "[0-9]{4}";
+    input.autocomplete = "off";
+    input.placeholder = "Enter 4-digit code";
+    input.required = true;
+    input.style.width = "100%";
+    input.style.padding = "12px";
+    input.style.border = "1px solid #cbd5e1";
+    input.style.borderRadius = "10px";
+    input.style.marginTop = "8px";
+    input.style.fontSize = "16px";
+
+    const id = "shopfront-pickup-" + booking.reservation_id;
+    input.id = id;
+    label.htmlFor = id;
+
+    const submit = makeElement(
+      "button", "Complete Pickup", "complete-pickup-button"
+    );
+    submit.type = "submit";
+
+    const feedback = makeElement("p");
+    feedback.style.marginTop = "10px";
+    feedback.setAttribute("aria-live", "polite");
+
+    form.append(label, input, submit, feedback);
+    entry.appendChild(form);
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+
+      const code = input.value.trim();
+      if (!/^[0-9]{4}$/.test(code)) {
+        feedback.textContent = "Please enter exactly four digits.";
+        return;
+      }
+
+      // The pickup code is sent only to the secure database RPC.
+      // Never print it in logs or display it on the shopkeeper screen.
+      submit.disabled = true;
+      submit.textContent = "Verifying...";
+      feedback.textContent = "Verifying with Supabase...";
+
+      try {
+        const supabaseClient = getClient();
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_confirm_pickup",
+          {
+            p_reservation_id: booking.reservation_id,
+            p_pickup_code: code
+          }
+        );
+
+        if (error) throw error;
+        input.value = "";
+
+        if (data?.success === true && data.status === "completed") {
+          feedback.textContent =
+            "Pickup completed successfully. Updating reservations...";
+          displayMessage(
+            "Pickup completed successfully in Supabase. Stock stays deducted."
+          );
+          await refreshOnlineShopkeeperReservations();
+          return;
+        }
+
+        if (data?.reason === "incorrect_code") {
+          feedback.textContent =
+            "Incorrect code. Attempts remaining: " +
+            String(data.attempts_remaining ?? 0) + ".";
+        } else if (data?.reason === "temporarily_locked") {
+          const until = data.locked_until
+            ? new Date(data.locked_until).toLocaleString("en-IN")
+            : "later";
+          feedback.textContent =
+            "Verification temporarily locked. Try again after " +
+            until + ".";
+        } else if (data?.reason === "expired") {
+          feedback.textContent =
+            "This reservation has expired and cannot be completed.";
+        } else if (data?.reason === "not_active") {
+          feedback.textContent =
+            "This reservation is no longer active.";
+        } else if (data?.reason === "not_found_or_unauthorized") {
+          feedback.textContent =
+            "Reservation unavailable or not assigned to your shop.";
+        } else {
+          feedback.textContent =
+            "Pickup could not be completed. Please refresh and try again.";
+        }
+      } catch (error) {
+        feedback.textContent =
+          "Pickup verification failed: " + error.message;
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Complete Pickup";
+      }
+    });
   }
 
   async function refreshOnlineShopkeeperReservations() {
@@ -875,6 +987,7 @@
             new Date(booking.expires_at).toLocaleString("en-IN")
           );
           addCountdown(entry, booking.expires_at);
+          addOnlinePickupVerification(entry, booking);
           shopkeeperReservationsOutput.appendChild(entry);
         });
       }
