@@ -1,0 +1,379 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shopfront V2 - Account Login</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f7fb;
+      color: #17253c;
+      margin: 0;
+      padding: 40px 16px;
+    }
+
+    .container {
+      max-width: 480px;
+      margin: 40px auto;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 38px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #64748b;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: white;
+      padding: 30px;
+      border-radius: 18px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    }
+
+    .card h2 {
+      margin-top: 0;
+    }
+
+    label {
+      display: block;
+      margin-top: 18px;
+      margin-bottom: 7px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      margin-top: 16px;
+    }
+
+    .signup {
+      background: #16a34a;
+      color: white;
+    }
+
+    .login {
+      background: #17253c;
+      color: white;
+    }
+
+    .logout {
+      background: #e2e8f0;
+      color: #17253c;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    .status {
+      margin-top: 22px;
+      padding: 14px;
+      background: #f1f5f9;
+      border-radius: 10px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
+    .status.success {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .status.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+    <h1>SHOPFRONT</h1>
+    <p class="subtitle">V2 - Secure Account Access</p>
+
+    <div class="card">
+
+      <div id="authForm">
+        <h2>Create Account / Login</h2>
+
+        <label for="fullName">Full Name (for registration)</label>
+        <input
+          id="fullName"
+          type="text"
+          placeholder="Enter your full name"
+          autocomplete="name"
+        >
+
+        <label for="email">Email Address</label>
+        <input
+          id="email"
+          type="email"
+          placeholder="Enter your email"
+          autocomplete="email"
+        >
+
+        <label for="password">Password</label>
+        <input
+          id="password"
+          type="password"
+          placeholder="Minimum 8 characters"
+          autocomplete="current-password"
+        >
+
+        <button class="signup" id="signupButton">
+          Create New Account
+        </button>
+
+        <button class="login" id="loginButton">
+          Login to Existing Account
+        </button>
+      </div>
+
+      <div id="accountPanel" class="hidden">
+        <h2>My Shopfront Account</h2>
+        <p id="accountInformation"></p>
+
+        <button class="logout" id="logoutButton">
+          Log Out
+        </button>
+      </div>
+
+      <div id="status" class="status">
+        Checking login status...
+      </div>
+
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="supabase-config.js"></script>
+
+  <script>
+    const statusBox = document.getElementById("status");
+    const signupButton = document.getElementById("signupButton");
+    const loginButton = document.getElementById("loginButton");
+    const logoutButton = document.getElementById("logoutButton");
+    const authForm = document.getElementById("authForm");
+    const accountPanel = document.getElementById("accountPanel");
+    const accountInformation = document.getElementById("accountInformation");
+
+    let client;
+
+    function showStatus(message, type = "") {
+      statusBox.textContent = message;
+      statusBox.className = "status " + type;
+    }
+
+    function setBusy(busy) {
+      signupButton.disabled = busy;
+      loginButton.disabled = busy;
+      logoutButton.disabled = busy;
+    }
+
+    function getCredentials() {
+      return {
+        name: document.getElementById("fullName").value.trim(),
+        email: document.getElementById("email").value.trim(),
+        password: document.getElementById("password").value
+      };
+    }
+
+    async function showAccount(user) {
+      if (!user) {
+        authForm.classList.remove("hidden");
+        accountPanel.classList.add("hidden");
+        return;
+      }
+
+      const { data: profile, error } = await client
+        .from("profiles")
+        .select("full_name, role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      authForm.classList.add("hidden");
+      accountPanel.classList.remove("hidden");
+
+      const name = profile?.full_name || "Not provided";
+      const role = profile?.role || "Not available";
+
+      accountInformation.textContent =
+        "Email: " + user.email +
+        "\nName: " + name +
+        "\nRole: " + role;
+
+      accountInformation.style.whiteSpace = "pre-line";
+
+      if (error) {
+        showStatus(
+          "Logged in, but profile could not be loaded: " +
+          error.message,
+          "error"
+        );
+      } else {
+        showStatus("Successfully logged in to Shopfront V2!", "success");
+      }
+    }
+
+    async function initialize() {
+      try {
+        const config = window.SHOPFRONT_SUPABASE;
+
+        if (!window.supabase || !config) {
+          throw new Error("Supabase configuration is missing.");
+        }
+
+        client = window.supabase.createClient(
+          config.url,
+          config.publishableKey
+        );
+
+        const { data, error } = await client.auth.getUser();
+
+        if (error && error.name !== "AuthSessionMissingError") {
+          throw error;
+        }
+
+        if (data?.user) {
+          await showAccount(data.user);
+        } else {
+          showStatus("Ready. Create an account or log in.");
+        }
+
+      } catch (error) {
+        showStatus("Connection error: " + error.message, "error");
+      }
+    }
+
+    signupButton.addEventListener("click", async () => {
+      const { name, email, password } = getCredentials();
+
+      if (!name || !email || password.length < 8) {
+        showStatus(
+          "Enter your name, email and a password of at least 8 characters.",
+          "error"
+        );
+        return;
+      }
+
+      setBusy(true);
+      showStatus("Creating account...");
+
+      try {
+        const { data, error } = await client.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name
+            },
+            emailRedirectTo:
+              "http://127.0.0.1:5500/index.html"
+          }
+        });
+
+        if (error) throw error;
+
+        if (data.session) {
+          await showAccount(data.user);
+        } else {
+          showStatus(
+            "Registration request received. Check your email for a confirmation link. After verifying, return here to log in.",
+            "success"
+          );
+        }
+
+      } catch (error) {
+        showStatus("Registration failed: " + error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    loginButton.addEventListener("click", async () => {
+      const { email, password } = getCredentials();
+
+      if (!email || !password) {
+        showStatus("Enter your email and password.", "error");
+        return;
+      }
+
+      setBusy(true);
+      showStatus("Logging in...");
+
+      try {
+        const { data, error } =
+          await client.auth.signInWithPassword({
+            email,
+            password
+          });
+
+        if (error) throw error;
+
+        await showAccount(data.user);
+
+      } catch (error) {
+        showStatus("Login failed: " + error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    logoutButton.addEventListener("click", async () => {
+      setBusy(true);
+
+      try {
+        const { error } = await client.auth.signOut();
+
+        if (error) throw error;
+
+        await showAccount(null);
+        document.getElementById("password").value = "";
+        showStatus("Successfully logged out.", "success");
+
+      } catch (error) {
+        showStatus("Logout failed: " + error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    initialize();
+  </script>
+
+</body>
+</html>
