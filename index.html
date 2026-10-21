@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -44,19 +45,28 @@
 
         <div class="gateway-grid">
 
-          <button class="gateway-card" data-role="customer">
+          <button
+            class="gateway-card"
+            data-role="customer"
+          >
             <span class="icon">🛍️</span>
             <h2>Customer</h2>
             <p>Search products and find nearby shops.</p>
           </button>
 
-          <button class="gateway-card" data-role="shopkeeper">
+          <button
+            class="gateway-card"
+            data-role="shopkeeper"
+          >
             <span class="icon">🏪</span>
             <h2>Shopkeeper</h2>
             <p>Add stock and manage reservations.</p>
           </button>
 
-          <button class="gateway-card" data-role="delivery">
+          <button
+            class="gateway-card"
+            data-role="delivery"
+          >
             <span class="icon">🛵</span>
             <h2>Delivery Partner</h2>
             <p>See and manage delivery jobs.</p>
@@ -70,11 +80,51 @@
 
       <div id="customerScreen" class="hidden">
 
-        <button id="backButton" class="back-button">
+        <button
+          id="backButton"
+          class="back-button"
+        >
           ← Back
         </button>
 
-        <h2 class="section-title">Customer Search</h2>
+        <h2 class="section-title">
+          Customer Search
+        </h2>
+
+        <!-- V2 CUSTOMER ACCOUNT -->
+
+        <div
+          id="customerAccountPanel"
+          class="shop-result"
+          style="margin-bottom: 24px;"
+        >
+
+          <h3>My Shopfront Account</h3>
+
+          <p
+            id="customerAccountStatus"
+            aria-live="polite"
+          >
+            Checking login status...
+          </p>
+
+          <button
+            id="customerAccountButton"
+            class="view-shop-button"
+            type="button"
+            disabled
+          >
+            Checking Account...
+          </button>
+
+          <p style="font-size: 13px; margin-top: 14px;">
+            You can browse products without logging in.
+            Online reservations will require an account.
+          </p>
+
+        </div>
+
+        <!-- PRODUCT SEARCH -->
 
         <div class="search-box">
 
@@ -84,7 +134,9 @@
             placeholder="Search for Activa brake pad"
           >
 
-          <button id="searchButton">Search</button>
+          <button id="searchButton">
+            Search
+          </button>
 
         </div>
 
@@ -94,9 +146,15 @@
 
       <!-- SHOP DETAILS -->
 
-      <div id="shopDetailScreen" class="hidden">
+      <div
+        id="shopDetailScreen"
+        class="hidden"
+      >
 
-        <button id="backToResultsButton" class="back-button">
+        <button
+          id="backToResultsButton"
+          class="back-button"
+        >
           ← Back to Results
         </button>
 
@@ -106,13 +164,21 @@
 
       <!-- MAP -->
 
-      <div id="mapScreen" class="hidden">
+      <div
+        id="mapScreen"
+        class="hidden"
+      >
 
-        <button id="backToShopButton" class="back-button">
+        <button
+          id="backToShopButton"
+          class="back-button"
+        >
           ← Back to Shop
         </button>
 
-        <h2 class="section-title">Shop Location</h2>
+        <h2 class="section-title">
+          Shop Location
+        </h2>
 
         <div id="map"></div>
 
@@ -120,13 +186,21 @@
 
       <!-- SHOPKEEPER -->
 
-      <div id="shopkeeperScreen" class="hidden">
+      <div
+        id="shopkeeperScreen"
+        class="hidden"
+      >
 
-        <button id="shopkeeperBackButton" class="back-button">
+        <button
+          id="shopkeeperBackButton"
+          class="back-button"
+        >
           ← Back
         </button>
 
-        <h2 class="section-title">Shopkeeper Dashboard</h2>
+        <h2 class="section-title">
+          Shopkeeper Dashboard
+        </h2>
 
         <div class="shopkeeper-layout">
 
@@ -134,7 +208,9 @@
 
             <h3>Shop Details</h3>
 
-            <label for="shopNameInput">Shop Name</label>
+            <label for="shopNameInput">
+              Shop Name
+            </label>
 
             <input
               id="shopNameInput"
@@ -142,7 +218,9 @@
               placeholder="Example: Patel Auto Parts"
             >
 
-            <label for="ownerNameInput">Owner Name</label>
+            <label for="ownerNameInput">
+              Owner Name
+            </label>
 
             <input
               id="ownerNameInput"
@@ -150,7 +228,9 @@
               placeholder="Owner name"
             >
 
-            <label for="shopPhoneInput">Phone Number</label>
+            <label for="shopPhoneInput">
+              Phone Number
+            </label>
 
             <input
               id="shopPhoneInput"
@@ -158,7 +238,9 @@
               placeholder="Phone number"
             >
 
-            <label for="shopAddressInput">Shop Address</label>
+            <label for="shopAddressInput">
+              Shop Address
+            </label>
 
             <input
               id="shopAddressInput"
@@ -174,7 +256,9 @@
               Honda Activa Brake Pad
             </div>
 
-            <label for="productPriceInput">Price</label>
+            <label for="productPriceInput">
+              Price
+            </label>
 
             <input
               id="productPriceInput"
@@ -243,9 +327,15 @@
 
       <!-- DELIVERY PARTNER -->
 
-      <div id="deliveryScreen" class="hidden">
+      <div
+        id="deliveryScreen"
+        class="hidden"
+      >
 
-        <button id="deliveryBackButton" class="back-button">
+        <button
+          id="deliveryBackButton"
+          class="back-button"
+        >
           ← Back
         </button>
 
@@ -259,7 +349,9 @@
 
             <h3>Delivery Partner</h3>
 
-            <label for="deliveryPersonName">Name</label>
+            <label for="deliveryPersonName">
+              Name
+            </label>
 
             <input
               id="deliveryPersonName"
@@ -324,9 +416,12 @@
 
       </div>
 
-      <!-- STATUS -->
+      <!-- GLOBAL STATUS -->
 
-      <div id="messageBox" class="message-box">
+      <div
+        id="messageBox"
+        class="message-box"
+      >
         Select a gateway to continue.
       </div>
 

@@ -1,3 +1,4 @@
+
 (function () {
   "use strict";
 
@@ -5,8 +6,14 @@
   const searchButton = document.getElementById("searchButton");
   const searchResults = document.getElementById("searchResults");
   const messageBox = document.getElementById("messageBox");
-  const shopDetailScreen = document.getElementById("shopDetailScreen");
   const shopDetailContent = document.getElementById("shopDetailContent");
+
+  const accountStatus = document.getElementById("customerAccountStatus");
+  const accountButton = document.getElementById("customerAccountButton");
+
+  const customerGateway = document.querySelector(
+    '.gateway-card[data-role="customer"]'
+  );
 
   const screens = [
     "gatewayScreen",
@@ -19,9 +26,16 @@
 
   let client = null;
   let latestSearch = 0;
+  let latestAccountCheck = 0;
+
+  // ==========================================
+  // SUPABASE CONNECTION
+  // ==========================================
 
   function getClient() {
-    if (client) return client;
+    if (client) {
+      return client;
+    }
 
     const config = window.SHOPFRONT_SUPABASE;
 
@@ -43,6 +57,108 @@
 
     return client;
   }
+
+  // ==========================================
+  // CUSTOMER ACCOUNT
+  // ==========================================
+
+  function setAccountStatus(text) {
+    accountStatus.textContent = text;
+    accountStatus.style.whiteSpace = "pre-line";
+  }
+
+  function showGuestAccount() {
+    setAccountStatus(
+      "You are browsing as a guest.\nLog in to use future online reservations."
+    );
+
+    accountButton.textContent = "Log In / Sign Up";
+    accountButton.disabled = false;
+  }
+
+  async function refreshCustomerAccount() {
+    const checkId = ++latestAccountCheck;
+
+    setAccountStatus("Checking your Shopfront account...");
+
+    accountButton.textContent = "Checking Account...";
+    accountButton.disabled = true;
+
+    try {
+      const supabaseClient = getClient();
+
+      const { data, error } =
+        await supabaseClient.auth.getUser();
+
+      if (checkId !== latestAccountCheck) {
+        return;
+      }
+
+      if (error || !data || !data.user) {
+        showGuestAccount();
+        return;
+      }
+
+      const user = data.user;
+
+      const {
+        data: profile,
+        error: profileError
+      } = await supabaseClient
+        .from("profiles")
+        .select("full_name, role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (checkId !== latestAccountCheck) {
+        return;
+      }
+
+      if (profileError) {
+        setAccountStatus(
+          "Logged in as: " + (user.email || "Account user") +
+          "\nProfile could not be loaded: " +
+          profileError.message
+        );
+      } else {
+        const name = profile?.full_name || "Not provided";
+        const role = profile?.role || "Not assigned";
+
+        setAccountStatus(
+          "Logged in as: " + (user.email || "Account user") +
+          "\nName: " + name +
+          "\nAccount role: " + role
+        );
+      }
+
+      accountButton.textContent = "Open My Account";
+      accountButton.disabled = false;
+
+    } catch (error) {
+      if (checkId !== latestAccountCheck) {
+        return;
+      }
+
+      setAccountStatus(
+        "Could not check login status: " + error.message
+      );
+
+      accountButton.textContent = "Open Account Page";
+      accountButton.disabled = false;
+    }
+  }
+
+  accountButton.addEventListener("click", () => {
+    window.location.href = "auth.html";
+  });
+
+  customerGateway.addEventListener("click", () => {
+    refreshCustomerAccount();
+  });
+
+  // ==========================================
+  // ELEMENT HELPERS
+  // ==========================================
 
   function makeElement(tag, text, className) {
     const element = document.createElement(tag);
@@ -67,6 +183,32 @@
       makeElement("p", text, "empty-result")
     );
   }
+
+  function showScreen(screenId) {
+    screens.forEach(id => {
+      document.getElementById(id).classList.add("hidden");
+    });
+
+    document
+      .getElementById(screenId)
+      .classList.remove("hidden");
+  }
+
+  function addDetailLine(parent, label, value) {
+    const paragraph = makeElement("p");
+    const strong = makeElement("strong", `${label}: `);
+
+    paragraph.append(
+      strong,
+      document.createTextNode(String(value))
+    );
+
+    parent.appendChild(paragraph);
+  }
+
+  // ==========================================
+  // PRODUCT SEARCH HELPERS
+  // ==========================================
 
   function normalizeWords(value) {
     return String(value || "")
@@ -94,26 +236,9 @@
     );
   }
 
-  function showScreen(screenId) {
-    screens.forEach(id => {
-      document.getElementById(id).classList.add("hidden");
-    });
-
-    document.getElementById(screenId)
-      .classList.remove("hidden");
-  }
-
-  function addDetailLine(parent, label, value) {
-    const paragraph = makeElement("p");
-    const strong = makeElement("strong", `${label}: `);
-
-    paragraph.append(
-      strong,
-      document.createTextNode(String(value))
-    );
-
-    parent.appendChild(paragraph);
-  }
+  // ==========================================
+  // ONLINE SHOP DETAILS
+  // ==========================================
 
   function openOnlineShop(product) {
     const shop = product.shops;
@@ -136,8 +261,18 @@
 
     addDetailLine(card, "Price", `₹${product.price}`);
     addDetailLine(card, "Available stock", product.stock);
-    addDetailLine(card, "Address", shop.address || "Not provided");
-    addDetailLine(card, "Phone", shop.phone || "Not provided");
+
+    addDetailLine(
+      card,
+      "Address",
+      shop.address || "Not provided"
+    );
+
+    addDetailLine(
+      card,
+      "Phone",
+      shop.phone || "Not provided"
+    );
 
     addDetailLine(
       card,
@@ -154,7 +289,6 @@
     notice.style.fontWeight = "bold";
 
     card.appendChild(notice);
-
     shopDetailContent.appendChild(card);
 
     showScreen("shopDetailScreen");
@@ -163,6 +297,10 @@
       `${shop.name} loaded from Supabase.`
     );
   }
+
+  // ==========================================
+  // ONLINE SEARCH RESULTS
+  // ==========================================
 
   function renderProducts(products) {
     searchResults.replaceChildren();
@@ -216,6 +354,10 @@
     });
   }
 
+  // ==========================================
+  // SUPABASE PRODUCT SEARCH
+  // ==========================================
+
   async function searchOnline() {
     const requestId = ++latestSearch;
     const query = searchInput.value.trim();
@@ -226,7 +368,10 @@
       return;
     }
 
-    showResultMessage("Searching the online Shopfront database...");
+    showResultMessage(
+      "Searching the online Shopfront database..."
+    );
+
     displayMessage("Connecting to Supabase...");
 
     try {
@@ -254,9 +399,13 @@
         .gt("stock", 0)
         .limit(100);
 
-      if (requestId !== latestSearch) return;
+      if (requestId !== latestSearch) {
+        return;
+      }
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       const matches = (data || [])
         .filter(product =>
@@ -283,7 +432,9 @@
       );
 
     } catch (error) {
-      if (requestId !== latestSearch) return;
+      if (requestId !== latestSearch) {
+        return;
+      }
 
       console.error("V2 catalog error:", error);
 
@@ -297,8 +448,9 @@
     }
   }
 
-  // Intercept only Customer search.
-  // Preserve the original V1 shopkeeper and delivery code.
+  // ==========================================
+  // CUSTOMER SEARCH EVENT OVERRIDES
+  // ==========================================
 
   searchButton.addEventListener(
     "click",
@@ -322,5 +474,13 @@
     true
   );
 
-  console.log("Shopfront V2 online catalog initialized.");
+  // ==========================================
+  // INITIALIZATION
+  // ==========================================
+
+  refreshCustomerAccount();
+
+  console.log(
+    "Shopfront V2 online catalog and account recognition initialized."
+  );
 })();
