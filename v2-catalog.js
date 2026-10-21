@@ -14,6 +14,9 @@
   const customerGateway = document.querySelector(
     '.gateway-card[data-role="customer"]'
   );
+  const shopkeeperGateway = document.querySelector(
+    '.gateway-card[data-role="shopkeeper"]'
+  );
 
   const screens = [
     "gatewayScreen",
@@ -695,11 +698,207 @@
     card.append(button, feedback);
   }
 
+
+  // ==========================================
+  // V2 SHOPKEEPER ONLINE RESERVATIONS (READ-ONLY)
+  // ==========================================
+
+  let shopkeeperAccessStatus = null;
+  let shopkeeperReservationsOutput = null;
+  let latestShopkeeperCheck = 0;
+
+  function setupOnlineShopkeeperDashboard() {
+    const screen = document.getElementById("shopkeeperScreen");
+    const localPrototypeLayout = screen.querySelector(".shopkeeper-layout");
+
+    // Prevent the old browser-only inventory and pickup queue from being
+    // mistaken for live Supabase information in the V2 dashboard.
+    localPrototypeLayout.classList.add("hidden");
+
+    const dashboard = makeElement("section");
+    dashboard.style.textAlign = "left";
+
+    const account = makeElement("div", undefined, "shopkeeper-card");
+    account.style.marginBottom = "22px";
+    account.appendChild(makeElement("h3", "My Shopkeeper Account"));
+
+    shopkeeperAccessStatus = makeElement(
+      "p", "Sign in as the owner of a shop to view online reservations."
+    );
+    shopkeeperAccessStatus.style.whiteSpace = "pre-line";
+    shopkeeperAccessStatus.setAttribute("aria-live", "polite");
+
+    const accountButton = makeElement(
+      "button", "Open Login / Account", "view-shop-button"
+    );
+    accountButton.type = "button";
+    accountButton.addEventListener("click", () => {
+      window.location.href = "auth.html";
+    });
+    account.append(shopkeeperAccessStatus, accountButton);
+
+    const queueCard = makeElement("div", undefined, "shopkeeper-card");
+    queueCard.appendChild(makeElement("h3", "Online Active Reservations"));
+    queueCard.appendChild(makeElement(
+      "p",
+      "Live reservation data from Supabase for shops owned by this account. Pickup verification is not connected yet.",
+      "queue-help-text"
+    ));
+
+    const refreshButton = makeElement(
+      "button", "Refresh Online Reservations", "view-shop-button"
+    );
+    refreshButton.type = "button";
+    refreshButton.addEventListener(
+      "click", refreshOnlineShopkeeperReservations
+    );
+
+    shopkeeperReservationsOutput = makeElement("div");
+    shopkeeperReservationsOutput.style.marginTop = "16px";
+    shopkeeperReservationsOutput.style.display = "grid";
+    shopkeeperReservationsOutput.style.gap = "12px";
+    shopkeeperReservationsOutput.setAttribute("aria-live", "polite");
+
+    queueCard.append(refreshButton, shopkeeperReservationsOutput);
+    dashboard.append(account, queueCard);
+    screen.insertBefore(dashboard, localPrototypeLayout);
+
+    // Capture-phase interception keeps the V1 localStorage shopkeeper
+    // handler from opening its unrelated demo queue on V2.
+    shopkeeperGateway.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      showScreen("shopkeeperScreen");
+      displayMessage("V2 online Shopkeeper Dashboard opened.");
+      refreshOnlineShopkeeperReservations();
+    }, true);
+  }
+
+  async function refreshOnlineShopkeeperReservations() {
+    if (!shopkeeperReservationsOutput) return;
+
+    const checkId = ++latestShopkeeperCheck;
+    shopkeeperAccessStatus.textContent =
+      "Checking your Shopkeeper account...";
+    shopkeeperReservationsOutput.replaceChildren(
+      makeElement("p", "Loading reservations from Supabase...")
+    );
+
+    try {
+      const supabaseClient = getClient();
+      const { data: userInfo, error: loginError } =
+        await supabaseClient.auth.getUser();
+
+      if (checkId !== latestShopkeeperCheck) return;
+      if (loginError && loginError.name !== "AuthSessionMissingError") {
+        throw loginError;
+      }
+
+      if (!userInfo?.user) {
+        shopkeeperAccessStatus.textContent =
+          "Not logged in.\nLog in with your Shopkeeper account.";
+        shopkeeperReservationsOutput.replaceChildren(
+          makeElement(
+            "p",
+            "Online reservations are available to assigned Shopkeepers only."
+          )
+        );
+        return;
+      }
+
+      const { data: profile, error: profileError } =
+        await supabaseClient.from("profiles")
+          .select("full_name, role, is_active")
+          .eq("id", userInfo.user.id)
+          .maybeSingle();
+
+      if (checkId !== latestShopkeeperCheck) return;
+      if (profileError) throw profileError;
+
+      if (!profile || !profile.is_active || profile.role !== "shopkeeper") {
+        shopkeeperAccessStatus.textContent =
+          "Logged in as: " + (userInfo.user.email || "Account user") +
+          "\nThis account does not have active Shopkeeper access.";
+        shopkeeperReservationsOutput.replaceChildren(
+          makeElement("p", "Use your assigned Shopkeeper account.")
+        );
+        return;
+      }
+
+      // Database RPC re-checks shop ownership and Shopkeeper role.
+      const { data: bookings, error: bookingsError } =
+        await supabaseClient.rpc("shopfront_shopkeeper_reservations");
+
+      if (checkId !== latestShopkeeperCheck) return;
+      if (bookingsError) throw bookingsError;
+      if (!Array.isArray(bookings)) {
+        throw new Error("Unexpected reservation response from Supabase.");
+      }
+
+      shopkeeperAccessStatus.textContent =
+        "Logged in as: " + (userInfo.user.email || "Account user") +
+        "\nRole: Shopkeeper" +
+        "\nOnly reservations for your assigned shops are displayed.";
+
+      shopkeeperReservationsOutput.replaceChildren();
+
+      if (bookings.length === 0) {
+        shopkeeperReservationsOutput.appendChild(
+          makeElement(
+            "p",
+            "No active online reservations at your shops right now.",
+            "empty-result"
+          )
+        );
+      } else {
+        shopkeeperReservationsOutput.appendChild(
+          makeElement(
+            "p",
+            bookings.length + " active online reservation(s) found."
+          )
+        );
+
+        bookings.forEach(booking => {
+          const entry = makeElement("div", undefined, "reservation-card");
+          entry.appendChild(makeElement("h4", booking.product_name));
+          addDetailLine(entry, "Shop", booking.shop_name);
+          addDetailLine(
+            entry, "Customer", booking.customer_name || "Not provided"
+          );
+          addDetailLine(entry, "Quantity", booking.quantity);
+          addDetailLine(
+            entry, "Reserved at",
+            new Date(booking.reserved_at).toLocaleString("en-IN")
+          );
+          addDetailLine(
+            entry, "Expires at",
+            new Date(booking.expires_at).toLocaleString("en-IN")
+          );
+          addCountdown(entry, booking.expires_at);
+          shopkeeperReservationsOutput.appendChild(entry);
+        });
+      }
+
+      displayMessage(
+        "Loaded " + bookings.length + " online shopkeeper reservation(s)."
+      );
+    } catch (error) {
+      if (checkId !== latestShopkeeperCheck) return;
+      shopkeeperAccessStatus.textContent =
+        "Could not verify Shopkeeper access.";
+      shopkeeperReservationsOutput.replaceChildren(
+        makeElement("p", "Online reservations failed: " + error.message)
+      );
+      displayMessage("Could not load online shopkeeper reservations.");
+    }
+  }
+
   // ==========================================
   // INITIALIZATION
   // ==========================================
 
   setupOnlineReservationsPanel();
+  setupOnlineShopkeeperDashboard();
   refreshCustomerAccount();
   loadMyOnlineReservations();
   setInterval(updateReservationCountdowns, 1000);
