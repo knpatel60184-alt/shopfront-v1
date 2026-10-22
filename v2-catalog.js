@@ -290,7 +290,7 @@
 
     const notice = makeElement(
       "p",
-      "Online pickup reservations and shopkeeper pickup confirmation are enabled. Online delivery orders are not connected to Supabase yet."
+      "Pickup reservations are available. Home delivery requests are being prepared for V2 testing; actual delivery service and order fulfilment are not live."
     );
 
     notice.style.marginTop = "22px";
@@ -298,6 +298,9 @@
 
     card.appendChild(notice);
     addReserveControls(card, product, stockLine);
+    if (shop.home_delivery === true) {
+      addDeliveryRequestControls(card, product, stockLine);
+    }
     shopDetailContent.appendChild(card);
 
     showScreen("shopDetailScreen");
@@ -701,6 +704,153 @@
     card.append(button, feedback);
   }
 
+
+
+  // ==========================================
+  // V2 CUSTOMER DELIVERY REQUEST FORM (SAFETY-GATED)
+  // ==========================================
+
+  // Keep submission OFF until customers can cancel unassigned requests
+  // and recover reserved stock. The database RPC is installed, but new
+  // requests must not be submitted through this UI prematurely.
+  const DELIVERY_REQUEST_SUBMISSION_ENABLED = false;
+
+  function addDeliveryRequestControls(card, product, stockLine) {
+    const section = makeElement("section");
+    section.style.marginTop = "24px";
+    section.style.padding = "16px";
+    section.style.border = "1px solid #cbd5e1";
+    section.style.borderRadius = "12px";
+
+    section.appendChild(makeElement("h3", "Request Home Delivery"));
+    section.appendChild(makeElement(
+      "p",
+      "V2 prototype only. A delivery request reserves one available unit; acceptance, cancellation, stock restoration and fulfilment safeguards are still being completed. No actual delivery is arranged by this form.",
+      "queue-help-text"
+    ));
+
+    const form = makeElement("form");
+    form.style.marginTop = "12px";
+
+    const label = makeElement("label", "Delivery Address");
+    label.style.display = "block";
+    label.style.fontWeight = "600";
+    label.style.marginBottom = "8px";
+
+    const address = makeElement("textarea");
+    address.id = "v2-delivery-address-" + product.id;
+    label.htmlFor = address.id;
+    address.rows = 3;
+    address.required = true;
+    address.minLength = 10;
+    address.maxLength = 500;
+    address.placeholder = "Enter your delivery address (10–500 characters)";
+    address.style.display = "block";
+    address.style.width = "100%";
+    address.style.padding = "12px";
+    address.style.border = "1px solid #cbd5e1";
+    address.style.borderRadius = "10px";
+    address.style.fontSize = "15px";
+    address.style.boxSizing = "border-box";
+
+    const submit = makeElement(
+      "button",
+      DELIVERY_REQUEST_SUBMISSION_ENABLED
+        ? "Submit Delivery Request"
+        : "Delivery Request — Not Yet Enabled",
+      "save-shop-button"
+    );
+    submit.type = "submit";
+    submit.disabled = !DELIVERY_REQUEST_SUBMISSION_ENABLED;
+
+    const feedback = makeElement("p");
+    feedback.style.marginTop = "10px";
+    feedback.setAttribute("aria-live", "polite");
+
+    if (!DELIVERY_REQUEST_SUBMISSION_ENABLED) {
+      feedback.textContent =
+        "Submission will be enabled after safe cancellation and stock restoration are implemented. Pickup reservations still work.";
+    }
+
+    form.append(label, address, submit, feedback);
+    section.appendChild(form);
+    card.appendChild(section);
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+
+      if (!DELIVERY_REQUEST_SUBMISSION_ENABLED) {
+        feedback.textContent = "Delivery requests are not enabled yet.";
+        return;
+      }
+
+      const destination = address.value.trim();
+      if (destination.length < 10 || destination.length > 500) {
+        feedback.textContent =
+          "Please enter a delivery address containing 10–500 characters.";
+        return;
+      }
+
+      submit.disabled = true;
+      submit.textContent = "Requesting Delivery...";
+      feedback.textContent = "Checking your account and available stock...";
+
+      let succeeded = false;
+      try {
+        const supabaseClient = getClient();
+        const { data: userInfo, error: loginError } =
+          await supabaseClient.auth.getUser();
+
+        if (loginError && loginError.name !== "AuthSessionMissingError") {
+          throw loginError;
+        }
+
+        if (!userInfo?.user) {
+          feedback.textContent =
+            "Please log in with an active Customer account to request delivery.";
+          return;
+        }
+
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_request_delivery",
+          {
+            p_product_id: product.id,
+            p_delivery_address: destination
+          }
+        );
+
+        if (error) throw error;
+
+        if (!data?.success) {
+          const reasons = {
+            already_requested: "You already have an active delivery request for this product.",
+            pickup_already_reserved: "You already reserved this product for pickup.",
+            out_of_stock: "The product has no available stock."
+          };
+          feedback.textContent =
+            reasons[data?.reason] ||
+            "Delivery request was not created. Please refresh and try again.";
+          return;
+        }
+
+        succeeded = true;
+        product.stock = Number(data.remaining_stock);
+        stockLine.lastChild.textContent = String(product.stock);
+
+        feedback.textContent =
+          "Delivery requested. Status: Requested. This is not an accepted or scheduled delivery.";
+        displayMessage("Online delivery request saved in Supabase.");
+      } catch (error) {
+        feedback.textContent =
+          "Delivery request failed: " + error.message;
+      } finally {
+        submit.disabled = succeeded || !DELIVERY_REQUEST_SUBMISSION_ENABLED;
+        submit.textContent = succeeded
+          ? "Delivery Requested"
+          : "Submit Delivery Request";
+      }
+    });
+  }
 
   // ==========================================
   // V2 SHOPKEEPER ONLINE RESERVATIONS AND PICKUP VERIFICATION
