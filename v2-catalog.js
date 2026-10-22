@@ -287,7 +287,7 @@
 
     const notice = makeElement(
       "p",
-      "V2 online pickup reservations are enabled for signed-in customers. Shopkeeper pickup confirmation and online delivery are not connected yet."
+      "Online pickup reservations and shopkeeper pickup confirmation are enabled. Online delivery orders are not connected to Supabase yet."
     );
 
     notice.style.marginTop = "22px";
@@ -770,7 +770,7 @@
     inventoryCard.appendChild(makeElement("h3", "My Online Inventory"));
     inventoryCard.appendChild(makeElement(
       "p",
-      "Live Supabase inventory for your shops. Add new products below. Editing existing prices or stock will be added separately.",
+      "Manage live Supabase inventory for your assigned shops. Edit prices and available stock, or add a new product below.",
       "queue-help-text"
     ));
 
@@ -815,7 +815,7 @@
 
 
   // ==========================================
-  // OWNER-VERIFIED SUPABASE INVENTORY (READ-ONLY)
+  // OWNER-VERIFIED SUPABASE INVENTORY AND UPDATES
   // ==========================================
 
 
@@ -968,6 +968,163 @@
     });
   }
 
+
+  // ==========================================
+  // SECURE SUPABASE PRICE / AVAILABLE STOCK EDITING
+  // ==========================================
+
+  function addShopkeeperProductEditControls(item, product) {
+    const editButton = makeElement(
+      "button", "Edit Price / Stock", "view-shop-button"
+    );
+    editButton.type = "button";
+    editButton.style.marginTop = "12px";
+
+    const form = makeElement("form");
+    form.style.display = "none";
+    form.style.marginTop = "14px";
+    form.style.padding = "14px";
+    form.style.border = "1px solid #cbd5e1";
+    form.style.borderRadius = "10px";
+
+    const note = makeElement(
+      "p",
+      "Stock means units available to reserve now (it excludes units already reserved). Refresh inventory before saving if another customer may have booked.",
+      "queue-help-text"
+    );
+    note.style.marginBottom = "12px";
+
+    const fields = makeElement("div");
+    fields.style.display = "grid";
+    fields.style.gridTemplateColumns = "repeat(auto-fit, minmax(160px, 1fr))";
+    fields.style.gap = "12px";
+
+    function addNumberField(title, initialValue, step, max) {
+      const wrapper = makeElement("div");
+      const label = makeElement("label", title);
+      label.style.display = "block";
+      label.style.fontWeight = "600";
+      label.style.marginBottom = "6px";
+
+      const input = makeElement("input");
+      input.type = "number";
+      input.required = true;
+      input.min = "0";
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(initialValue);
+      input.style.width = "100%";
+      input.style.padding = "12px";
+      input.style.border = "1px solid #cbd5e1";
+      input.style.borderRadius = "10px";
+      input.style.fontSize = "15px";
+
+      const id = "v2-edit-" + title.toLowerCase().replace(/[^a-z0-9]/g, "-")
+        + "-" + product.product_id;
+      input.id = id;
+      label.htmlFor = id;
+
+      wrapper.append(label, input);
+      fields.appendChild(wrapper);
+      return input;
+    }
+
+    const priceInput = addNumberField("Price (₹)", product.price, 0.01, 10000000);
+    const stockInput = addNumberField(
+      "Available Stock", product.stock, 1, 1000000
+    );
+
+    const actions = makeElement("div");
+    actions.style.display = "flex";
+    actions.style.flexWrap = "wrap";
+    actions.style.gap = "10px";
+    actions.style.marginTop = "14px";
+
+    const saveButton = makeElement(
+      "button", "Save Price / Stock", "save-shop-button"
+    );
+    saveButton.type = "submit";
+
+    const cancelButton = makeElement("button", "Cancel", "view-shop-button");
+    cancelButton.type = "button";
+    cancelButton.addEventListener("click", () => {
+      form.style.display = "none";
+      editButton.textContent = "Edit Price / Stock";
+    });
+
+    actions.append(saveButton, cancelButton);
+    const feedback = makeElement("p", "");
+    feedback.style.marginTop = "10px";
+    feedback.setAttribute("aria-live", "polite");
+
+    form.append(note, fields, actions, feedback);
+    item.append(editButton, form);
+
+    editButton.addEventListener("click", () => {
+      const opening = form.style.display === "none";
+      form.style.display = opening ? "block" : "none";
+      editButton.textContent = opening ? "Hide Editor" : "Edit Price / Stock";
+    });
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+
+      const priceText = priceInput.value.trim();
+      const stockText = stockInput.value.trim();
+      if (!/^\d+(?:\.\d{1,2})?$/.test(priceText) ||
+          !/^\d+$/.test(stockText)) {
+        feedback.textContent =
+          "Enter a non-negative price (up to two decimals) and whole-number stock.";
+        return;
+      }
+
+      const price = Number(priceText);
+      const stock = Number(stockText);
+      if (!Number.isFinite(price) || price > 10000000 ||
+          !Number.isSafeInteger(stock) || stock > 1000000) {
+        feedback.textContent = "Price or stock is outside the allowed range.";
+        return;
+      }
+
+      saveButton.disabled = true;
+      cancelButton.disabled = true;
+      feedback.textContent = "Saving securely in Supabase...";
+
+      try {
+        const supabaseClient = getClient();
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_update_product",
+          {
+            p_product_id: product.product_id,
+            p_price: price,
+            p_stock: stock,
+            p_expected_price: Number(product.price),
+            p_expected_stock: Number(product.stock)
+          }
+        );
+
+        if (error) throw error;
+        if (!data?.success || data.product_id !== product.product_id) {
+          throw new Error("Database did not confirm the product update.");
+        }
+
+        await refreshOnlineShopkeeperInventory();
+        shopkeeperInventoryNotice.textContent =
+          "Updated \"" + product.name + "\" successfully. Price: ₹" +
+          String(data.price) + ", available stock: " + String(data.stock) + ".";
+        displayMessage("Product price and available stock saved to Supabase.");
+
+      } catch (error) {
+        feedback.textContent =
+          "Update failed: " + error.message +
+          " If inventory changed, refresh it before trying again.";
+      } finally {
+        saveButton.disabled = false;
+        cancelButton.disabled = false;
+      }
+    });
+  }
+
   async function refreshOnlineShopkeeperInventory() {
     if (!shopkeeperInventoryOutput) return;
 
@@ -1052,6 +1209,7 @@
               item, "Listing status",
               product.is_active ? "Active" : "Inactive"
             );
+            addShopkeeperProductEditControls(item, product);
             shopCard.appendChild(item);
           });
         }
