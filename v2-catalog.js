@@ -1549,6 +1549,7 @@
   let deliveryAccessStatus = null;
   let onlineDeliveryJobsSection = null;
   let onlineDeliveryJobsOutput = null;
+  let onlineDeliveryJobsNotice = null;
   let latestDeliveryAccountCheck = 0;
   let latestDeliveryJobsCheck = 0;
 
@@ -1605,7 +1606,7 @@
     onlineDeliveryJobsSection.appendChild(
       makeElement(
         "p",
-        "Live deliveries assigned to your account from Supabase. Only accepted or picked-up jobs appear here. Job acceptance and status updates will be added separately.",
+        "Live Supabase deliveries assigned to your account. Confirm pickup at the shop before marking a job picked up, and confirm handover before marking it delivered. New delivery requests are not enabled yet.",
         "queue-help-text"
       )
     );
@@ -1618,6 +1619,10 @@
       refreshOnlineDeliveryJobs();
     });
 
+    onlineDeliveryJobsNotice = makeElement("p", "");
+    onlineDeliveryJobsNotice.style.marginTop = "12px";
+    onlineDeliveryJobsNotice.setAttribute("aria-live", "polite");
+
     onlineDeliveryJobsOutput = makeElement("div");
     onlineDeliveryJobsOutput.style.display = "grid";
     onlineDeliveryJobsOutput.style.gap = "12px";
@@ -1626,6 +1631,7 @@
 
     onlineDeliveryJobsSection.append(
       refreshJobsButton,
+      onlineDeliveryJobsNotice,
       onlineDeliveryJobsOutput
     );
     onlineDeliveryJobsSection.classList.add("hidden");
@@ -1657,6 +1663,7 @@
     // Invalidate any previous in-flight job request before showing another user.
     ++latestDeliveryJobsCheck;
     onlineDeliveryJobsOutput.replaceChildren();
+    onlineDeliveryJobsNotice.textContent = "";
     onlineDeliveryJobsSection.classList.add("hidden");
 
     try {
@@ -1710,6 +1717,78 @@
     }
   }
 
+
+
+  // Secure, owner-checked delivery status transitions.
+  // Only one valid action is displayed for each current job status.
+  function addDeliveryAdvanceControl(card, job) {
+    if (job.status !== "accepted" && job.status !== "picked_up") {
+      return;
+    }
+
+    const nextStatus = job.status === "accepted" ? "picked_up" : "delivered";
+    const label = job.status === "accepted"
+      ? "Mark as Picked Up"
+      : "Mark as Delivered";
+
+    const button = makeElement("button", label, "view-shop-button");
+    button.type = "button";
+    button.style.marginTop = "14px";
+
+    const feedback = makeElement("p", "");
+    feedback.style.marginTop = "10px";
+    feedback.setAttribute("aria-live", "polite");
+
+    card.append(button, feedback);
+
+    button.addEventListener("click", async () => {
+      const action = nextStatus === "picked_up"
+        ? "Confirm this product was actually collected from the shop?"
+        : "Confirm this product was actually handed to the customer?";
+
+      if (!window.confirm(action)) return;
+
+      button.disabled = true;
+      button.textContent = "Updating...";
+      feedback.textContent = "Verifying the delivery in Supabase...";
+
+      try {
+        const supabaseClient = getClient();
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_partner_advance_delivery",
+          {
+            p_delivery_id: job.delivery_id,
+            p_expected_status: job.status
+          }
+        );
+
+        if (error) throw error;
+        if (data?.success !== true ||
+            data.delivery_id !== job.delivery_id ||
+            data.status !== nextStatus) {
+          throw new Error("The database did not confirm the status update.");
+        }
+
+        await refreshOnlineDeliveryJobs();
+        onlineDeliveryJobsNotice.textContent =
+          (nextStatus === "picked_up"
+            ? "Pickup confirmed successfully."
+            : "Delivery completed successfully.") +
+          " The status was saved in Supabase.";
+        displayMessage(
+          nextStatus === "picked_up"
+            ? "Delivery job marked as picked up."
+            : "Delivery job marked as delivered."
+        );
+      } catch (error) {
+        feedback.textContent = "Could not update delivery: " +
+          error.message + " Refresh assigned deliveries and try again.";
+      } finally {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    });
+  }
 
   async function refreshOnlineDeliveryJobs(accountCheckId) {
     if (!onlineDeliveryJobsOutput || !onlineDeliveryJobsSection) return;
@@ -1785,6 +1864,7 @@
           );
         }
 
+        addDeliveryAdvanceControl(card, job);
         onlineDeliveryJobsOutput.appendChild(card);
       }
 
