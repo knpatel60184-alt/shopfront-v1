@@ -706,6 +706,8 @@
   let shopkeeperAccessStatus = null;
   let shopkeeperReservationsOutput = null;
   let latestShopkeeperCheck = 0;
+  let shopkeeperInventoryOutput = null;
+  let latestInventoryCheck = 0;
 
   function setupOnlineShopkeeperDashboard() {
     const screen = document.getElementById("shopkeeperScreen");
@@ -760,7 +762,33 @@
     shopkeeperReservationsOutput.setAttribute("aria-live", "polite");
 
     queueCard.append(refreshButton, shopkeeperReservationsOutput);
-    dashboard.append(account, queueCard);
+
+    // Read-only Supabase inventory, separate from the V1 localStorage form.
+    const inventoryCard = makeElement("div", undefined, "shopkeeper-card");
+    inventoryCard.style.marginBottom = "22px";
+    inventoryCard.appendChild(makeElement("h3", "My Online Inventory"));
+    inventoryCard.appendChild(makeElement(
+      "p",
+      "Live prices and stock from Supabase for shops assigned to your account. Inventory editing will be added after secure owner-only controls.",
+      "queue-help-text"
+    ));
+
+    const refreshInventoryButton = makeElement(
+      "button", "Refresh Online Inventory", "view-shop-button"
+    );
+    refreshInventoryButton.type = "button";
+    refreshInventoryButton.addEventListener(
+      "click", refreshOnlineShopkeeperInventory
+    );
+
+    shopkeeperInventoryOutput = makeElement("div");
+    shopkeeperInventoryOutput.style.marginTop = "16px";
+    shopkeeperInventoryOutput.style.display = "grid";
+    shopkeeperInventoryOutput.style.gap = "14px";
+    shopkeeperInventoryOutput.setAttribute("aria-live", "polite");
+
+    inventoryCard.append(refreshInventoryButton, shopkeeperInventoryOutput);
+    dashboard.append(account, inventoryCard, queueCard);
     screen.insertBefore(dashboard, localPrototypeLayout);
 
     // Capture-phase interception keeps the V1 localStorage shopkeeper
@@ -771,9 +799,114 @@
       showScreen("shopkeeperScreen");
       displayMessage("V2 online Shopkeeper Dashboard opened.");
       refreshOnlineShopkeeperReservations();
+      refreshOnlineShopkeeperInventory();
     }, true);
   }
 
+
+
+  // ==========================================
+  // OWNER-VERIFIED SUPABASE INVENTORY (READ-ONLY)
+  // ==========================================
+
+  async function refreshOnlineShopkeeperInventory() {
+    if (!shopkeeperInventoryOutput) return;
+
+    const checkId = ++latestInventoryCheck;
+    const isCurrent = () => checkId === latestInventoryCheck;
+
+    shopkeeperInventoryOutput.replaceChildren(
+      makeElement("p", "Loading your online inventory...")
+    );
+
+    try {
+      const supabaseClient = getClient();
+      const { data: userInfo, error: loginError } =
+        await supabaseClient.auth.getUser();
+
+      if (!isCurrent()) return;
+      if (loginError && loginError.name !== "AuthSessionMissingError") {
+        throw loginError;
+      }
+
+      if (!userInfo?.user) {
+        shopkeeperInventoryOutput.replaceChildren(
+          makeElement("p", "Log in with your Shopkeeper account to view inventory.")
+        );
+        return;
+      }
+
+      const { data: profile, error: profileError } =
+        await supabaseClient.from("profiles")
+          .select("role, is_active")
+          .eq("id", userInfo.user.id)
+          .maybeSingle();
+
+      if (!isCurrent()) return;
+      if (profileError) throw profileError;
+
+      if (!profile || !profile.is_active || profile.role !== "shopkeeper") {
+        shopkeeperInventoryOutput.replaceChildren(
+          makeElement("p", "This account does not have Shopkeeper inventory access.")
+        );
+        return;
+      }
+
+      // The database function independently enforces role and shop ownership.
+      const { data: shops, error: inventoryError } =
+        await supabaseClient.rpc("shopfront_shopkeeper_inventory");
+
+      if (!isCurrent()) return;
+      if (inventoryError) throw inventoryError;
+      if (!Array.isArray(shops)) {
+        throw new Error("Unexpected inventory response from Supabase.");
+      }
+
+      shopkeeperInventoryOutput.replaceChildren();
+
+      if (shops.length === 0) {
+        shopkeeperInventoryOutput.appendChild(
+          makeElement("p", "No online shops are assigned to this account.", "empty-result")
+        );
+        return;
+      }
+
+      shops.forEach(shop => {
+        const shopCard = makeElement("div", undefined, "reservation-card");
+        shopCard.appendChild(makeElement("h4", shop.shop_name || "Unnamed shop"));
+        const products = Array.isArray(shop.products) ? shop.products : [];
+
+        if (products.length === 0) {
+          shopCard.appendChild(
+            makeElement("p", "No products have been added to this shop yet.")
+          );
+        } else {
+          products.forEach(product => {
+            const item = makeElement("div");
+            item.style.padding = "12px 0";
+            item.style.borderTop = "1px solid #e5e7eb";
+            item.appendChild(makeElement("h4", product.name || "Unnamed product"));
+            addDetailLine(item, "Category", product.category || "Not specified");
+            addDetailLine(item, "Price", "₹" + product.price);
+            addDetailLine(item, "Available stock", product.stock);
+            addDetailLine(
+              item, "Listing status",
+              product.is_active ? "Active" : "Inactive"
+            );
+            shopCard.appendChild(item);
+          });
+        }
+
+        shopkeeperInventoryOutput.appendChild(shopCard);
+      });
+
+    } catch (error) {
+      if (!isCurrent()) return;
+      shopkeeperInventoryOutput.replaceChildren(
+        makeElement("p", "Could not load online inventory: " + error.message)
+      );
+    }
+  }
 
   function addOnlinePickupVerification(entry, booking) {
     const form = makeElement("form");
