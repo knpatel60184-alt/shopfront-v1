@@ -1548,7 +1548,9 @@
 
   let deliveryAccessStatus = null;
   let onlineDeliveryJobsSection = null;
+  let onlineDeliveryJobsOutput = null;
   let latestDeliveryAccountCheck = 0;
+  let latestDeliveryJobsCheck = 0;
 
   function setupOnlineDeliveryDashboard() {
     const screen = document.getElementById("deliveryScreen");
@@ -1603,9 +1605,28 @@
     onlineDeliveryJobsSection.appendChild(
       makeElement(
         "p",
-        "Your verified Delivery Partner account is connected. Online delivery assignments and status controls are not connected yet. No real delivery jobs can be accepted or marked delivered from this screen.",
+        "Live deliveries assigned to your account from Supabase. Only accepted or picked-up jobs appear here. Job acceptance and status updates will be added separately.",
         "queue-help-text"
       )
+    );
+
+    const refreshJobsButton = makeElement(
+      "button", "Refresh Assigned Deliveries", "view-shop-button"
+    );
+    refreshJobsButton.type = "button";
+    refreshJobsButton.addEventListener("click", () => {
+      refreshOnlineDeliveryJobs();
+    });
+
+    onlineDeliveryJobsOutput = makeElement("div");
+    onlineDeliveryJobsOutput.style.display = "grid";
+    onlineDeliveryJobsOutput.style.gap = "12px";
+    onlineDeliveryJobsOutput.style.marginTop = "16px";
+    onlineDeliveryJobsOutput.setAttribute("aria-live", "polite");
+
+    onlineDeliveryJobsSection.append(
+      refreshJobsButton,
+      onlineDeliveryJobsOutput
     );
     onlineDeliveryJobsSection.classList.add("hidden");
 
@@ -1633,6 +1654,9 @@
     const isCurrent = () => checkId === latestDeliveryAccountCheck;
 
     deliveryAccessStatus.textContent = "Checking Delivery Partner account...";
+    // Invalidate any previous in-flight job request before showing another user.
+    ++latestDeliveryJobsCheck;
+    onlineDeliveryJobsOutput.replaceChildren();
     onlineDeliveryJobsSection.classList.add("hidden");
 
     try {
@@ -1677,11 +1701,98 @@
 
       onlineDeliveryJobsSection.classList.remove("hidden");
       displayMessage("Verified Delivery Partner account in Supabase.");
+      await refreshOnlineDeliveryJobs(checkId);
 
     } catch (error) {
       if (!isCurrent()) return;
       deliveryAccessStatus.textContent =
         "Could not verify Delivery Partner access: " + error.message;
+    }
+  }
+
+
+  async function refreshOnlineDeliveryJobs(accountCheckId) {
+    if (!onlineDeliveryJobsOutput || !onlineDeliveryJobsSection) return;
+
+    const requestId = ++latestDeliveryJobsCheck;
+    const isCurrent = () =>
+      requestId === latestDeliveryJobsCheck &&
+      (accountCheckId === undefined ||
+       accountCheckId === latestDeliveryAccountCheck);
+
+    if (onlineDeliveryJobsSection.classList.contains("hidden")) {
+      return;
+    }
+
+    onlineDeliveryJobsOutput.replaceChildren(
+      makeElement("p", "Loading assigned deliveries from Supabase...")
+    );
+
+    try {
+      const supabaseClient = getClient();
+      // This RPC independently validates auth.uid(), active partner role,
+      // and delivery_partner_id for each returned job.
+      const { data: jobs, error } =
+        await supabaseClient.rpc("shopfront_partner_deliveries");
+
+      if (!isCurrent()) return;
+      if (error) throw error;
+      if (!Array.isArray(jobs)) {
+        throw new Error("Unexpected delivery response from Supabase.");
+      }
+
+      onlineDeliveryJobsOutput.replaceChildren();
+      if (jobs.length === 0) {
+        onlineDeliveryJobsOutput.appendChild(makeElement(
+          "p",
+          "No active deliveries are assigned to your account right now.",
+          "empty-result"
+        ));
+        return;
+      }
+
+      onlineDeliveryJobsOutput.appendChild(makeElement(
+        "p",
+        String(jobs.length) + " active assigned delivery job(s)."
+      ));
+
+      for (const job of jobs) {
+        const card = makeElement("div", undefined, "reservation-card");
+        card.appendChild(makeElement(
+          "h4", job.product_name || "Assigned delivery"
+        ));
+        addDetailLine(card, "Shop", job.shop_name || "Not provided");
+        addDetailLine(
+          card, "Pickup location", job.shop_address || "Not provided"
+        );
+        addDetailLine(card, "Customer", job.customer_name || "Not provided");
+        addDetailLine(
+          card, "Customer phone", job.customer_phone || "Not provided"
+        );
+        addDetailLine(
+          card, "Delivery address", job.delivery_address || "Not provided"
+        );
+        addDetailLine(card, "Quantity", job.quantity);
+        addDetailLine(
+          card,
+          "Status",
+          job.status === "picked_up" ? "Picked up" : "Accepted"
+        );
+        if (job.requested_at) {
+          addDetailLine(
+            card, "Requested at",
+            new Date(job.requested_at).toLocaleString("en-IN")
+          );
+        }
+
+        onlineDeliveryJobsOutput.appendChild(card);
+      }
+
+    } catch (error) {
+      if (!isCurrent()) return;
+      onlineDeliveryJobsOutput.replaceChildren(makeElement(
+        "p", "Unable to load assigned deliveries: " + error.message
+      ));
     }
   }
 
