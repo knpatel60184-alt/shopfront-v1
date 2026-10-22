@@ -161,6 +161,7 @@
   customerGateway.addEventListener("click", () => {
     refreshCustomerAccount();
     loadMyOnlineReservations();
+    loadMyDeliveryRequests();
   });
 
   // ==========================================
@@ -493,6 +494,9 @@
 
   let reservationsOutput = null;
   let latestReservationsCheck = 0;
+  let deliveryHistoryOutput = null;
+  let deliveryHistoryNotice = null;
+  let latestDeliveryHistoryCheck = 0;
 
   function setupOnlineReservationsPanel() {
     const accountPanel = document.getElementById("customerAccountPanel");
@@ -516,6 +520,217 @@
 
     panel.append(heading, help, refresh, reservationsOutput);
     accountPanel.insertAdjacentElement("afterend", panel);
+  }
+
+
+  // ==========================================
+  // V2 CUSTOMER DELIVERY HISTORY AND CANCELLATION
+  // ==========================================
+
+  function setupCustomerDeliveryRequestsPanel() {
+    const accountPanel = document.getElementById("customerAccountPanel");
+    const panel = makeElement("section", undefined, "shop-result");
+    panel.style.marginBottom = "24px";
+
+    const heading = makeElement("h3", "My Delivery Requests");
+    const help = makeElement(
+      "p",
+      "View your Supabase delivery-request history. Unassigned requests can be cancelled before assignment; accepted or later-stage requests cannot be cancelled here. Delivery requests are not yet enabled for new Customer orders."
+    );
+
+    const refresh = makeElement(
+      "button", "Refresh Delivery Requests", "view-shop-button"
+    );
+    refresh.type = "button";
+    refresh.addEventListener("click", loadMyDeliveryRequests);
+
+    deliveryHistoryNotice = makeElement("p", "");
+    deliveryHistoryNotice.style.marginTop = "10px";
+    deliveryHistoryNotice.setAttribute("aria-live", "polite");
+
+    deliveryHistoryOutput = makeElement("div");
+    deliveryHistoryOutput.style.marginTop = "14px";
+    deliveryHistoryOutput.style.display = "grid";
+    deliveryHistoryOutput.style.gap = "12px";
+    deliveryHistoryOutput.setAttribute("aria-live", "polite");
+
+    panel.append(
+      heading, help, refresh, deliveryHistoryNotice, deliveryHistoryOutput
+    );
+
+    const reservationsPanel = accountPanel.nextElementSibling;
+    if (reservationsPanel) {
+      reservationsPanel.insertAdjacentElement("afterend", panel);
+    } else {
+      accountPanel.insertAdjacentElement("afterend", panel);
+    }
+  }
+
+  function displayCustomerDeliveryRequest(request) {
+    const entry = makeElement("div", undefined, "reservation-card");
+    entry.appendChild(makeElement(
+      "h4", request.product_name || "Delivery request"
+    ));
+    addDetailLine(entry, "Shop", request.shop_name || "Not available");
+    addDetailLine(entry, "Status", ({
+      requested: "Requested — Awaiting Assignment",
+      accepted: "Accepted — Assigned to Delivery Partner",
+      picked_up: "Picked Up",
+      delivered: "Delivered",
+      cancelled: "Cancelled",
+      expired: "Expired — Stock Restored"
+    })[request.status] || request.status || "Unknown");
+    addDetailLine(entry, "Quantity", request.quantity);
+    addDetailLine(entry, "Delivery address", request.delivery_address || "Not provided");
+
+    const timeLine = [
+      ["Requested at", request.requested_at],
+      ["Assign before", request.status === "requested" ? request.expires_at : null],
+      ["Accepted at", request.accepted_at],
+      ["Picked up at", request.picked_up_at],
+      ["Delivered at", request.delivered_at],
+      ["Cancelled at", request.cancelled_at],
+      ["Expired at", request.expired_at]
+    ];
+    timeLine.forEach(([label, value]) => {
+      if (value) {
+        const date = new Date(value);
+        addDetailLine(entry, label, Number.isFinite(date.getTime())
+          ? date.toLocaleString("en-IN")
+          : "Unavailable");
+      }
+    });
+
+    if (request.can_cancel === true && request.status === "requested") {
+      const cancel = makeElement(
+        "button", "Cancel Unassigned Request", "view-shop-button"
+      );
+      cancel.type = "button";
+      cancel.style.marginTop = "12px";
+
+      const feedback = makeElement("p", "");
+      feedback.setAttribute("aria-live", "polite");
+      entry.append(cancel, feedback);
+
+      cancel.addEventListener("click", async () => {
+        if (!window.confirm(
+          "Cancel this unassigned delivery request? " +
+          "One reserved unit will return to the shop's available stock. " +
+          "This action cannot be undone."
+        )) {
+          return;
+        }
+
+        cancel.disabled = true;
+        cancel.textContent = "Cancelling...";
+        feedback.textContent = "Checking request ownership and status...";
+
+        try {
+          const supabaseClient = getClient();
+          const { data, error } = await supabaseClient.rpc(
+            "shopfront_cancel_delivery_request",
+            { p_delivery_id: request.delivery_id }
+          );
+
+          if (error) throw error;
+          if (!data?.success ||
+              data.delivery_id !== request.delivery_id ||
+              data.status !== "cancelled" ||
+              Number(data.restored_quantity) !== Number(request.quantity)) {
+            throw new Error("Database did not confirm cancellation and stock restoration.");
+          }
+
+          await loadMyDeliveryRequests();
+          deliveryHistoryNotice.textContent =
+            "Delivery request cancelled successfully. Reserved stock was restored.";
+          displayMessage("Customer delivery request cancelled in Supabase.");
+        } catch (error) {
+          feedback.textContent =
+            "Cancellation failed: " + error.message +
+            " Refresh requests to see the latest status.";
+          cancel.disabled = false;
+          cancel.textContent = "Cancel Unassigned Request";
+        }
+      });
+    }
+
+    return entry;
+  }
+
+  async function loadMyDeliveryRequests() {
+    if (!deliveryHistoryOutput || !deliveryHistoryNotice) return;
+    const checkId = ++latestDeliveryHistoryCheck;
+    const isCurrent = () => checkId === latestDeliveryHistoryCheck;
+    deliveryHistoryNotice.textContent = "";
+    deliveryHistoryOutput.replaceChildren(
+      makeElement("p", "Loading your delivery requests from Supabase...")
+    );
+
+    try {
+      const supabaseClient = getClient();
+      const { data: userInfo, error: loginError } =
+        await supabaseClient.auth.getUser();
+
+      if (!isCurrent()) return;
+      if (loginError && loginError.name !== "AuthSessionMissingError") {
+        throw loginError;
+      }
+
+      if (!userInfo?.user) {
+        deliveryHistoryOutput.replaceChildren(
+          makeElement("p", "Log in with your Customer account to view delivery requests.")
+        );
+        return;
+      }
+
+      const { data: profile, error: profileError } =
+        await supabaseClient.from("profiles")
+          .select("role, is_active")
+          .eq("id", userInfo.user.id)
+          .maybeSingle();
+
+      if (!isCurrent()) return;
+      if (profileError) throw profileError;
+
+      if (!profile || profile.role !== "customer" ||
+          profile.is_active !== true) {
+        deliveryHistoryOutput.replaceChildren(
+          makeElement("p", "Only an active Customer account can view its delivery requests.")
+        );
+        return;
+      }
+
+      // This RPC independently rechecks Customer role and filters
+      // strictly by auth.uid(). Never query other customers' jobs.
+      const { data, error } =
+        await supabaseClient.rpc("shopfront_customer_delivery_requests");
+
+      if (!isCurrent()) return;
+      if (error) throw error;
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected delivery history response from Supabase.");
+      }
+
+      deliveryHistoryOutput.replaceChildren();
+
+      if (data.length === 0) {
+        deliveryHistoryOutput.appendChild(
+          makeElement("p", "No delivery requests in your account yet.", "empty-result")
+        );
+        return;
+      }
+
+      data.forEach(request => {
+        deliveryHistoryOutput.appendChild(
+          displayCustomerDeliveryRequest(request)
+        );
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      deliveryHistoryOutput.replaceChildren(
+        makeElement("p", "Could not load delivery requests: " + error.message)
+      );
+    }
   }
 
   function updateReservationCountdowns() {
@@ -2292,10 +2507,12 @@
   // ==========================================
 
   setupOnlineReservationsPanel();
+  setupCustomerDeliveryRequestsPanel();
   setupOnlineShopkeeperDashboard();
   setupOnlineDeliveryDashboard();
   refreshCustomerAccount();
   loadMyOnlineReservations();
+  loadMyDeliveryRequests();
   setInterval(updateReservationCountdowns, 1000);
 
   console.log(
