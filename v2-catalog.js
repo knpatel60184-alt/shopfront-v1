@@ -17,6 +17,9 @@
   const shopkeeperGateway = document.querySelector(
     '.gateway-card[data-role="shopkeeper"]'
   );
+  const deliveryGateway = document.querySelector(
+    '.gateway-card[data-role="delivery"]'
+  );
 
   const screens = [
     "gatewayScreen",
@@ -1538,12 +1541,157 @@
     }
   }
 
+
+  // ==========================================
+  // V2 DELIVERY PARTNER GATEWAY — SECURE ACCOUNT FOUNDATION
+  // ==========================================
+
+  let deliveryAccessStatus = null;
+  let onlineDeliveryJobsSection = null;
+  let latestDeliveryAccountCheck = 0;
+
+  function setupOnlineDeliveryDashboard() {
+    const screen = document.getElementById("deliveryScreen");
+    const legacyDeliveryLayout = screen.querySelector(".delivery-layout");
+
+    // V1 delivery forms and jobs are localStorage-only demo data.
+    // Hide them entirely in V2 so they cannot be mistaken for live orders.
+    if (legacyDeliveryLayout) {
+      legacyDeliveryLayout.classList.add("hidden");
+    }
+
+    const dashboard = makeElement("section");
+    dashboard.style.textAlign = "left";
+
+    const accountCard = makeElement("div", undefined, "shopkeeper-card");
+    accountCard.style.marginBottom = "22px";
+    accountCard.appendChild(makeElement("h3", "My Delivery Partner Account"));
+
+    deliveryAccessStatus = makeElement(
+      "p", "Checking Delivery Partner access..."
+    );
+    deliveryAccessStatus.style.whiteSpace = "pre-line";
+    deliveryAccessStatus.setAttribute("aria-live", "polite");
+
+    const accountLink = makeElement(
+      "button", "Open Login / Account", "view-shop-button"
+    );
+    accountLink.type = "button";
+    accountLink.addEventListener("click", () => {
+      window.location.href = "auth.html";
+    });
+
+    const refreshButton = makeElement(
+      "button", "Refresh Delivery Partner Access", "view-shop-button"
+    );
+    refreshButton.type = "button";
+    refreshButton.style.marginLeft = "10px";
+    refreshButton.addEventListener("click", refreshOnlineDeliveryAccount);
+
+    accountCard.append(
+      deliveryAccessStatus,
+      accountLink,
+      refreshButton
+    );
+
+    onlineDeliveryJobsSection = makeElement(
+      "div", undefined, "shopkeeper-card"
+    );
+    onlineDeliveryJobsSection.appendChild(
+      makeElement("h3", "Online Delivery Jobs")
+    );
+    onlineDeliveryJobsSection.appendChild(
+      makeElement(
+        "p",
+        "Your verified Delivery Partner account is connected. Online delivery assignments and status controls are not connected yet. No real delivery jobs can be accepted or marked delivered from this screen.",
+        "queue-help-text"
+      )
+    );
+    onlineDeliveryJobsSection.classList.add("hidden");
+
+    dashboard.append(accountCard, onlineDeliveryJobsSection);
+    if (legacyDeliveryLayout) {
+      screen.insertBefore(dashboard, legacyDeliveryLayout);
+    } else {
+      screen.appendChild(dashboard);
+    }
+
+    // Override the browser-only V1 delivery gateway handler in V2.
+    deliveryGateway.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      showScreen("deliveryScreen");
+      displayMessage("V2 Delivery Partner Dashboard opened.");
+      refreshOnlineDeliveryAccount();
+    }, true);
+  }
+
+  async function refreshOnlineDeliveryAccount() {
+    if (!deliveryAccessStatus || !onlineDeliveryJobsSection) return;
+
+    const checkId = ++latestDeliveryAccountCheck;
+    const isCurrent = () => checkId === latestDeliveryAccountCheck;
+
+    deliveryAccessStatus.textContent = "Checking Delivery Partner account...";
+    onlineDeliveryJobsSection.classList.add("hidden");
+
+    try {
+      const supabaseClient = getClient();
+      const { data: userInfo, error: loginError } =
+        await supabaseClient.auth.getUser();
+
+      if (!isCurrent()) return;
+      if (loginError && loginError.name !== "AuthSessionMissingError") {
+        throw loginError;
+      }
+
+      if (!userInfo?.user) {
+        deliveryAccessStatus.textContent =
+          "Not logged in.\nLog in using your Delivery Partner account.";
+        return;
+      }
+
+      const { data: profile, error: profileError } =
+        await supabaseClient.from("profiles")
+          .select("full_name, role, is_active")
+          .eq("id", userInfo.user.id)
+          .maybeSingle();
+
+      if (!isCurrent()) return;
+      if (profileError) throw profileError;
+
+      const email = userInfo.user.email || "Account user";
+      if (!profile || profile.role !== "delivery_partner" ||
+          profile.is_active !== true) {
+        deliveryAccessStatus.textContent =
+          "Logged in as: " + email +
+          "\nThis account does not have active Delivery Partner access.";
+        return;
+      }
+
+      deliveryAccessStatus.textContent =
+        "Logged in as: " + email +
+        "\nName: " + (profile.full_name || "Not provided") +
+        "\nRole: Delivery Partner" +
+        "\nAccount status: Active";
+
+      onlineDeliveryJobsSection.classList.remove("hidden");
+      displayMessage("Verified Delivery Partner account in Supabase.");
+
+    } catch (error) {
+      if (!isCurrent()) return;
+      deliveryAccessStatus.textContent =
+        "Could not verify Delivery Partner access: " + error.message;
+    }
+  }
+
   // ==========================================
   // INITIALIZATION
   // ==========================================
 
   setupOnlineReservationsPanel();
   setupOnlineShopkeeperDashboard();
+  setupOnlineDeliveryDashboard();
   refreshCustomerAccount();
   loadMyOnlineReservations();
   setInterval(updateReservationCountdowns, 1000);
