@@ -862,6 +862,9 @@
   let shopkeeperInventoryOutput = null;
   let shopkeeperInventoryNotice = null;
   let latestInventoryCheck = 0;
+  let shopkeeperDeliveryRequestsOutput = null;
+  let shopkeeperDeliveryNotice = null;
+  let latestDeliveryQueueCheck = 0;
 
   function setupOnlineShopkeeperDashboard() {
     const screen = document.getElementById("shopkeeperScreen");
@@ -917,6 +920,39 @@
 
     queueCard.append(refreshButton, shopkeeperReservationsOutput);
 
+    const deliveryQueueCard = makeElement("div", undefined, "shopkeeper-card");
+    deliveryQueueCard.style.marginBottom = "22px";
+    deliveryQueueCard.appendChild(makeElement("h3", "Pending Delivery Requests"));
+    deliveryQueueCard.appendChild(makeElement(
+      "p",
+      "Pending requests for your own shops from Supabase. Assign only to a verified Delivery Partner. Requests expire after 30 minutes if not assigned. New customer requests are not enabled yet.",
+      "queue-help-text"
+    ));
+
+    const deliveryRefreshButton = makeElement(
+      "button", "Refresh Pending Deliveries", "view-shop-button"
+    );
+    deliveryRefreshButton.type = "button";
+    deliveryRefreshButton.addEventListener(
+      "click", refreshShopkeeperDeliveryQueue
+    );
+
+    shopkeeperDeliveryNotice = makeElement("p", "");
+    shopkeeperDeliveryNotice.style.marginTop = "12px";
+    shopkeeperDeliveryNotice.setAttribute("aria-live", "polite");
+
+    shopkeeperDeliveryRequestsOutput = makeElement("div");
+    shopkeeperDeliveryRequestsOutput.style.display = "grid";
+    shopkeeperDeliveryRequestsOutput.style.gap = "14px";
+    shopkeeperDeliveryRequestsOutput.style.marginTop = "16px";
+    shopkeeperDeliveryRequestsOutput.setAttribute("aria-live", "polite");
+
+    deliveryQueueCard.append(
+      deliveryRefreshButton,
+      shopkeeperDeliveryNotice,
+      shopkeeperDeliveryRequestsOutput
+    );
+
     // Read-only Supabase inventory, separate from the V1 localStorage form.
     const inventoryCard = makeElement("div", undefined, "shopkeeper-card");
     inventoryCard.style.marginBottom = "22px";
@@ -950,7 +986,7 @@
       shopkeeperInventoryNotice,
       shopkeeperInventoryOutput
     );
-    dashboard.append(account, inventoryCard, queueCard);
+    dashboard.append(account, inventoryCard, queueCard, deliveryQueueCard);
     screen.insertBefore(dashboard, localPrototypeLayout);
 
     // Capture-phase interception keeps the V1 localStorage shopkeeper
@@ -962,10 +998,235 @@
       displayMessage("V2 online Shopkeeper Dashboard opened.");
       refreshOnlineShopkeeperReservations();
       refreshOnlineShopkeeperInventory();
+      refreshShopkeeperDeliveryQueue();
     }, true);
   }
 
 
+
+
+  // ==========================================
+  // V2 SHOPKEEPER PENDING DELIVERY ASSIGNMENTS
+  // ==========================================
+
+  async function refreshShopkeeperDeliveryQueue() {
+    if (!shopkeeperDeliveryRequestsOutput || !shopkeeperDeliveryNotice) return;
+
+    const requestId = ++latestDeliveryQueueCheck;
+    const isCurrent = () => requestId === latestDeliveryQueueCheck;
+    shopkeeperDeliveryNotice.textContent = "";
+    shopkeeperDeliveryRequestsOutput.replaceChildren(
+      makeElement("p", "Checking your pending deliveries in Supabase...")
+    );
+
+    try {
+      const supabaseClient = getClient();
+      const { data: userData, error: authError } =
+        await supabaseClient.auth.getUser();
+      if (!isCurrent()) return;
+      if (authError && authError.name !== "AuthSessionMissingError") {
+        throw authError;
+      }
+
+      if (!userData?.user) {
+        shopkeeperDeliveryRequestsOutput.replaceChildren(makeElement(
+          "p", "Log in as your assigned Shopkeeper to view pending deliveries."
+        ));
+        return;
+      }
+
+      const { data: profile, error: profileError } =
+        await supabaseClient.from("profiles")
+          .select("role, is_active")
+          .eq("id", userData.user.id)
+          .maybeSingle();
+
+      if (!isCurrent()) return;
+      if (profileError) throw profileError;
+      if (!profile || profile.role !== "shopkeeper" ||
+          profile.is_active !== true) {
+        shopkeeperDeliveryRequestsOutput.replaceChildren(makeElement(
+          "p", "This account does not have Shopkeeper delivery-management access."
+        ));
+        return;
+      }
+
+      // Server independently filters requests by owned shops and
+      // returns only active, verified partner account IDs and names.
+      const { data: queue, error: queueError } =
+        await supabaseClient.rpc("shopfront_shopkeeper_delivery_queue");
+      if (!isCurrent()) return;
+      if (queueError) throw queueError;
+
+      if (!queue || !Array.isArray(queue.requests) ||
+          !Array.isArray(queue.partners)) {
+        throw new Error("Unexpected delivery queue response from Supabase.");
+      }
+
+      shopkeeperDeliveryRequestsOutput.replaceChildren();
+
+      if (queue.requests.length === 0) {
+        shopkeeperDeliveryRequestsOutput.appendChild(makeElement(
+          "p", "No pending delivery requests for your shops right now.",
+          "empty-result"
+        ));
+        return;
+      }
+
+      shopkeeperDeliveryRequestsOutput.appendChild(makeElement(
+        "p", String(queue.requests.length) + " pending delivery request(s)."
+      ));
+
+      for (const request of queue.requests) {
+        const entry = makeElement("div", undefined, "reservation-card");
+        entry.appendChild(makeElement(
+          "h4", request.product_name || "Delivery request"
+        ));
+        addDetailLine(entry, "Shop", request.shop_name || "Not provided");
+        addDetailLine(
+          entry, "Customer", request.customer_name || "Not provided"
+        );
+        addDetailLine(
+          entry, "Customer phone", request.customer_phone || "Not provided"
+        );
+        addDetailLine(entry, "Delivery address", request.delivery_address);
+        addDetailLine(entry, "Quantity", request.quantity);
+        addDetailLine(entry, "Status", "Requested (unassigned)");
+
+        if (request.expires_at) {
+          addDetailLine(
+            entry,
+            "Assign before",
+            new Date(request.expires_at).toLocaleString("en-IN")
+          );
+          addCountdown(entry, request.expires_at);
+        }
+
+        if (queue.partners.length === 0) {
+          entry.appendChild(makeElement(
+            "p",
+            "No verified active Delivery Partner accounts are available for assignment."
+          ));
+        } else {
+          addShopkeeperDeliveryAssignment(entry, request, queue.partners);
+        }
+
+        shopkeeperDeliveryRequestsOutput.appendChild(entry);
+      }
+
+    } catch (error) {
+      if (!isCurrent()) return;
+      shopkeeperDeliveryRequestsOutput.replaceChildren(
+        makeElement("p", "Could not load pending deliveries: " + error.message)
+      );
+    }
+  }
+
+  function addShopkeeperDeliveryAssignment(entry, request, partners) {
+    const form = makeElement("form");
+    form.style.marginTop = "16px";
+
+    const label = makeElement("label", "Assign to verified Delivery Partner");
+    label.style.display = "block";
+    label.style.fontWeight = "600";
+    label.style.marginBottom = "8px";
+
+    const selector = makeElement("select");
+    selector.required = true;
+    selector.style.width = "100%";
+    selector.style.maxWidth = "440px";
+    selector.style.padding = "12px";
+    selector.style.border = "1px solid #cbd5e1";
+    selector.style.borderRadius = "10px";
+
+    const emptyOption = makeElement("option", "Choose a Delivery Partner");
+    emptyOption.value = "";
+    selector.appendChild(emptyOption);
+
+    for (const partner of partners) {
+      if (!partner.partner_id) continue;
+      const option = makeElement(
+        "option", partner.partner_name || "Delivery Partner"
+      );
+      option.value = partner.partner_id;
+      selector.appendChild(option);
+    }
+
+    const submit = makeElement(
+      "button", "Assign Delivery", "save-shop-button"
+    );
+    submit.type = "submit";
+    submit.style.display = "block";
+    submit.style.marginTop = "12px";
+
+    const feedback = makeElement("p", "");
+    feedback.style.marginTop = "10px";
+    feedback.setAttribute("aria-live", "polite");
+
+    form.append(label, selector, submit, feedback);
+    entry.appendChild(form);
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+
+      const partnerId = selector.value;
+      const selectedPartner = partners.find(
+        partner => partner.partner_id === partnerId
+      );
+      if (!selectedPartner) {
+        feedback.textContent = "Choose a verified Delivery Partner.";
+        return;
+      }
+
+      if (!window.confirm(
+        "Assign \"" + request.product_name + "\" to " +
+        selectedPartner.partner_name + "? " +
+        "This will mark the request Accepted/Assigned. " +
+        "Only the chosen Partner may complete pickup and delivery."
+      )) {
+        return;
+      }
+
+      submit.disabled = true;
+      selector.disabled = true;
+      submit.textContent = "Assigning...";
+      feedback.textContent = "Verifying shop ownership and request status...";
+
+      try {
+        const supabaseClient = getClient();
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_assign_delivery",
+          {
+            p_delivery_id: request.delivery_id,
+            p_partner_id: partnerId
+          }
+        );
+
+        if (error) throw error;
+        if (!data?.success ||
+            data.delivery_id !== request.delivery_id ||
+            data.delivery_partner_id !== partnerId ||
+            data.status !== "accepted") {
+          throw new Error("Database did not confirm this delivery assignment.");
+        }
+
+        await refreshShopkeeperDeliveryQueue();
+        shopkeeperDeliveryNotice.textContent =
+          "Delivery assigned to " + selectedPartner.partner_name +
+          " successfully. Status: Accepted (assigned).";
+        displayMessage("Shopkeeper delivery assignment saved in Supabase.");
+
+      } catch (error) {
+        feedback.textContent =
+          "Assignment failed: " + error.message +
+          " Refresh pending deliveries and try again.";
+      } finally {
+        submit.disabled = false;
+        selector.disabled = false;
+        submit.textContent = "Assign Delivery";
+      }
+    });
+  }
 
   // ==========================================
   // OWNER-VERIFIED SUPABASE INVENTORY AND UPDATES
