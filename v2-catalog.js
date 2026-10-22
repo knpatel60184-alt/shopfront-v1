@@ -286,12 +286,12 @@
     addDetailLine(
       card,
       "Home delivery",
-      shop.home_delivery ? "Available" : "Not available"
+      shop.home_delivery ? "V2 test requests only" : "Not available"
     );
 
     const notice = makeElement(
       "p",
-      "Pickup reservations are available. Home delivery requests are being prepared for V2 testing; actual delivery service and order fulfilment are not live."
+      "Pickup reservations are available. Home delivery requests are enabled for controlled V2 prototype testing only. No physical delivery, payment or fulfilment service is live."
     );
 
     notice.style.marginTop = "22px";
@@ -347,7 +347,7 @@
         makeElement(
           "p",
           shop.home_delivery
-            ? "Home delivery: Available"
+            ? "Home delivery: V2 test requests"
             : "Home delivery: Not available"
         )
       );
@@ -922,13 +922,14 @@
 
 
   // ==========================================
-  // V2 CUSTOMER DELIVERY REQUEST FORM (SAFETY-GATED)
+  // V2 CUSTOMER DELIVERY REQUEST FORM (CONTROLLED TESTING)
   // ==========================================
 
-  // Keep submission OFF until customers can cancel unassigned requests
-  // and recover reserved stock. The database RPC is installed, but new
-  // requests must not be submitted through this UI prematurely.
-  const DELIVERY_REQUEST_SUBMISSION_ENABLED = false;
+  // Database protections for customer ownership, stock reservation,
+  // cancellation, expiry and partner assignment have been tested.
+  // V2 submissions are now enabled for prototype testing ONLY.
+  // The published V1 site and real-world fulfillment are unaffected.
+  const DELIVERY_REQUEST_SUBMISSION_ENABLED = true;
 
   function addDeliveryRequestControls(card, product, stockLine) {
     const section = makeElement("section");
@@ -940,7 +941,7 @@
     section.appendChild(makeElement("h3", "Request Home Delivery"));
     section.appendChild(makeElement(
       "p",
-      "V2 prototype only. A delivery request reserves one available unit; acceptance, cancellation, stock restoration and fulfilment safeguards are still being completed. No actual delivery is arranged by this form.",
+      "V2 prototype testing only. A request temporarily reserves one available unit for up to 30 minutes while awaiting Shopkeeper assignment. You can cancel before assignment; unassigned requests expire and restore stock automatically. No payment, delivery promise or actual physical service is offered.",
       "queue-help-text"
     ));
 
@@ -982,10 +983,8 @@
     feedback.style.marginTop = "10px";
     feedback.setAttribute("aria-live", "polite");
 
-    if (!DELIVERY_REQUEST_SUBMISSION_ENABLED) {
-      feedback.textContent =
-        "Submission will be enabled after safe cancellation and stock restoration are implemented. Pickup reservations still work.";
-    }
+    feedback.textContent =
+      "Testing only: use a dummy address and do not enter real customer information. No physical delivery will occur.";
 
     form.append(label, address, submit, feedback);
     section.appendChild(form);
@@ -1053,8 +1052,9 @@
         stockLine.lastChild.textContent = String(product.stock);
 
         feedback.textContent =
-          "Delivery requested. Status: Requested. This is not an accepted or scheduled delivery.";
-        displayMessage("Online delivery request saved in Supabase.");
+          "Test delivery request saved. Status: Awaiting Assignment. Open My Delivery Requests to track or cancel before assignment. No real delivery has been scheduled.";
+        displayMessage("V2 test delivery request saved in Supabase.");
+        await loadMyDeliveryRequests();
       } catch (error) {
         feedback.textContent =
           "Delivery request failed: " + error.message;
@@ -1140,7 +1140,7 @@
     deliveryQueueCard.appendChild(makeElement("h3", "Pending Delivery Requests"));
     deliveryQueueCard.appendChild(makeElement(
       "p",
-      "Pending requests for your own shops from Supabase. Assign only to a verified Delivery Partner. Requests expire after 30 minutes if not assigned. New customer requests are not enabled yet.",
+      "Pending requests for your own shops from Supabase. Assign only to a verified Delivery Partner. Unassigned requests expire after 30 minutes. This is a V2 prototype: do not arrange physical delivery.",
       "queue-help-text"
     ));
 
@@ -2232,7 +2232,7 @@
     onlineDeliveryJobsSection.appendChild(
       makeElement(
         "p",
-        "Live Supabase deliveries assigned to your account. Confirm pickup at the shop before marking a job picked up, and confirm handover before marking it delivered. New delivery requests are not enabled yet.",
+        "V2 prototype jobs assigned to your account. Status changes are simulated during testing: do not physically pick up or deliver anything. Customer test requests are enabled.",
         "queue-help-text"
       )
     );
