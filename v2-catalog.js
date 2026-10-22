@@ -707,6 +707,7 @@
   let shopkeeperReservationsOutput = null;
   let latestShopkeeperCheck = 0;
   let shopkeeperInventoryOutput = null;
+  let shopkeeperInventoryNotice = null;
   let latestInventoryCheck = 0;
 
   function setupOnlineShopkeeperDashboard() {
@@ -769,7 +770,7 @@
     inventoryCard.appendChild(makeElement("h3", "My Online Inventory"));
     inventoryCard.appendChild(makeElement(
       "p",
-      "Live prices and stock from Supabase for shops assigned to your account. Inventory editing will be added after secure owner-only controls.",
+      "Live Supabase inventory for your shops. Add new products below. Editing existing prices or stock will be added separately.",
       "queue-help-text"
     ));
 
@@ -787,7 +788,15 @@
     shopkeeperInventoryOutput.style.gap = "14px";
     shopkeeperInventoryOutput.setAttribute("aria-live", "polite");
 
-    inventoryCard.append(refreshInventoryButton, shopkeeperInventoryOutput);
+    shopkeeperInventoryNotice = makeElement("p", "");
+    shopkeeperInventoryNotice.style.marginTop = "12px";
+    shopkeeperInventoryNotice.setAttribute("aria-live", "polite");
+
+    inventoryCard.append(
+      refreshInventoryButton,
+      shopkeeperInventoryNotice,
+      shopkeeperInventoryOutput
+    );
     dashboard.append(account, inventoryCard, queueCard);
     screen.insertBefore(dashboard, localPrototypeLayout);
 
@@ -808,6 +817,156 @@
   // ==========================================
   // OWNER-VERIFIED SUPABASE INVENTORY (READ-ONLY)
   // ==========================================
+
+
+  // ==========================================
+  // SECURE SUPABASE PRODUCT CREATION (V2)
+  // ==========================================
+
+  function addShopkeeperProductForm(shopCard, shop) {
+    const form = makeElement("form");
+    form.style.marginTop = "18px";
+    form.style.paddingTop = "18px";
+    form.style.borderTop = "1px solid #e5e7eb";
+
+    const heading = makeElement("h4", "Add New Product");
+    heading.style.marginBottom = "10px";
+    form.appendChild(heading);
+
+    const inputs = makeElement("div");
+    inputs.style.display = "grid";
+    inputs.style.gridTemplateColumns = "repeat(auto-fit, minmax(180px, 1fr))";
+    inputs.style.gap = "12px";
+
+    function field(title, type, placeholder, required) {
+      const wrapper = makeElement("div");
+      const label = makeElement("label", title);
+      label.style.display = "block";
+      label.style.marginBottom = "6px";
+      label.style.fontWeight = "600";
+
+      const input = makeElement("input");
+      input.type = type;
+      input.placeholder = placeholder;
+      input.required = required;
+      input.style.width = "100%";
+      input.style.padding = "12px";
+      input.style.border = "1px solid #cbd5e1";
+      input.style.borderRadius = "10px";
+      input.style.fontSize = "15px";
+
+      const identifier =
+        "v2-new-" + title.toLowerCase().replace(/[^a-z0-9]/g, "-") +
+        "-" + shop.shop_id;
+      input.id = identifier;
+      label.htmlFor = identifier;
+
+      wrapper.append(label, input);
+      inputs.appendChild(wrapper);
+      return input;
+    }
+
+    const nameInput = field("Product Name", "text", "e.g. Engine Oil", true);
+    nameInput.maxLength = 160;
+
+    const categoryInput = field(
+      "Category (optional)", "text", "e.g. Two Wheeler Parts", false
+    );
+    categoryInput.maxLength = 100;
+
+    const priceInput = field("Price (₹)", "number", "e.g. 350", true);
+    priceInput.min = "0";
+    priceInput.max = "10000000";
+    priceInput.step = "0.01";
+
+    const stockInput = field("Initial Stock", "number", "e.g. 10", true);
+    stockInput.min = "0";
+    stockInput.max = "1000000";
+    stockInput.step = "1";
+
+    const submitButton = makeElement(
+      "button", "Add Product to Shop", "save-shop-button"
+    );
+    submitButton.type = "submit";
+
+    const feedback = makeElement("p", "");
+    feedback.style.marginTop = "12px";
+    feedback.setAttribute("aria-live", "polite");
+
+    form.append(inputs, submitButton, feedback);
+    shopCard.appendChild(form);
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+
+      const name = nameInput.value.trim();
+      const category = categoryInput.value.trim();
+      const priceText = priceInput.value.trim();
+      const stockText = stockInput.value.trim();
+
+      // Mirror server-side validation for clear feedback.
+      if (name.length < 2 || name.length > 160) {
+        feedback.textContent = "Product name must contain 2–160 characters.";
+        return;
+      }
+      if (category.length > 100) {
+        feedback.textContent = "Category must be at most 100 characters.";
+        return;
+      }
+      if (!/^\d+(?:\.\d{1,2})?$/.test(priceText) ||
+          !/^\d+$/.test(stockText)) {
+        feedback.textContent =
+          "Enter a valid non-negative price (maximum 2 decimals) and whole-number stock.";
+        return;
+      }
+
+      const price = Number(priceText);
+      const stock = Number(stockText);
+
+      if (!Number.isFinite(price) || price > 10000000 ||
+          !Number.isSafeInteger(stock) || stock > 1000000) {
+        feedback.textContent =
+          "Price must not exceed ₹1,00,00,000 and stock must not exceed 10,00,000.";
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.textContent = "Adding Product...";
+      feedback.textContent = "Saving product securely in Supabase...";
+
+      try {
+        const supabaseClient = getClient();
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_add_product",
+          {
+            p_shop_id: shop.shop_id,
+            p_name: name,
+            p_category: category || null,
+            p_price: price,
+            p_stock: stock
+          }
+        );
+
+        if (error) throw error;
+        if (!data?.success || !data.product_id) {
+          throw new Error("The database did not confirm product creation.");
+        }
+
+        await refreshOnlineShopkeeperInventory();
+        shopkeeperInventoryNotice.textContent =
+          "Product \"" + name + "\" added successfully to " +
+          shop.shop_name + ".";
+        displayMessage("New online product added to Supabase.");
+
+      } catch (error) {
+        feedback.textContent =
+          "Could not add product: " + error.message;
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Add Product to Shop";
+      }
+    });
+  }
 
   async function refreshOnlineShopkeeperInventory() {
     if (!shopkeeperInventoryOutput) return;
@@ -897,6 +1056,7 @@
           });
         }
 
+        addShopkeeperProductForm(shopCard, shop);
         shopkeeperInventoryOutput.appendChild(shopCard);
       });
 
