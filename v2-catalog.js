@@ -770,7 +770,7 @@
     inventoryCard.appendChild(makeElement("h3", "My Online Inventory"));
     inventoryCard.appendChild(makeElement(
       "p",
-      "Manage live Supabase inventory for your assigned shops. Edit prices and available stock, or add a new product below.",
+      "Manage your Supabase inventory: edit prices and stock, add products, or deactivate and reactivate listings. Existing reservations remain valid.",
       "queue-help-text"
     ));
 
@@ -1125,6 +1125,86 @@
     });
   }
 
+
+  // ==========================================
+  // SECURE SUPABASE LISTING ACTIVATION CONTROLS
+  // ==========================================
+
+  function addShopkeeperListingControls(item, product) {
+    const currentlyActive = product.is_active === true;
+    const targetActive = !currentlyActive;
+    const actionText = currentlyActive
+      ? "Deactivate Listing"
+      : "Reactivate Listing";
+
+    const button = makeElement("button", actionText, "view-shop-button");
+    button.type = "button";
+    button.style.marginTop = "12px";
+    button.style.marginLeft = "10px";
+
+    const feedback = makeElement("p", "");
+    feedback.style.marginTop = "10px";
+    feedback.setAttribute("aria-live", "polite");
+
+    const explanation = makeElement(
+      "p",
+      "Deactivating hides the product from new Customer searches and reservations. Existing reservations stay active until collected or expired.",
+      "queue-help-text"
+    );
+    explanation.style.marginTop = "10px";
+
+    item.append(button, feedback);
+    if (currentlyActive) item.appendChild(explanation);
+
+    button.addEventListener("click", async () => {
+      if (currentlyActive && !window.confirm(
+        "Deactivate \"" + product.name + "\"? " +
+        "Customers will no longer discover or newly reserve this product. " +
+        "Existing reservations are not cancelled."
+      )) {
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "Updating Listing...";
+      feedback.textContent = "Saving listing status in Supabase...";
+
+      try {
+        const supabaseClient = getClient();
+        const { data, error } = await supabaseClient.rpc(
+          "shopfront_set_product_active",
+          {
+            p_product_id: product.product_id,
+            p_is_active: targetActive,
+            p_expected_is_active: currentlyActive
+          }
+        );
+
+        if (error) throw error;
+        if (!data?.success ||
+            data.product_id !== product.product_id ||
+            data.is_active !== targetActive) {
+          throw new Error("Database did not confirm the listing status.");
+        }
+
+        await refreshOnlineShopkeeperInventory();
+        shopkeeperInventoryNotice.textContent =
+          "\"" + product.name + "\" " +
+          (targetActive ? "reactivated" : "deactivated") +
+          " successfully in Supabase.";
+        displayMessage("Online product listing status updated.");
+
+      } catch (error) {
+        feedback.textContent =
+          "Could not update listing: " + error.message +
+          " Refresh online inventory before trying again.";
+      } finally {
+        button.disabled = false;
+        button.textContent = actionText;
+      }
+    });
+  }
+
   async function refreshOnlineShopkeeperInventory() {
     if (!shopkeeperInventoryOutput) return;
 
@@ -1210,6 +1290,7 @@
               product.is_active ? "Active" : "Inactive"
             );
             addShopkeeperProductEditControls(item, product);
+            addShopkeeperListingControls(item, product);
             shopCard.appendChild(item);
           });
         }
