@@ -302,7 +302,7 @@
               full_name: name
             },
             emailRedirectTo:
-              "http://127.0.0.1:5500/index.html"
+              new URL("index.html", window.location.href).href
           }
         });
 
