@@ -535,7 +535,7 @@
     const heading = makeElement("h3", "My Delivery Requests");
     const help = makeElement(
       "p",
-      "View your Supabase delivery-request history. Unassigned requests can be cancelled before assignment; accepted or later-stage requests cannot be cancelled here. Delivery requests are not yet enabled for new Customer orders."
+      "View your Supabase delivery-request history. Unassigned requests can be cancelled before assignment; accepted or later-stage requests cannot be cancelled here. V2 delivery requests are enabled for controlled prototype testing only; no actual delivery is arranged."
     );
 
     const refresh = makeElement(
